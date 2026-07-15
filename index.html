@@ -48,7 +48,24 @@
 
     <div class="command-backdrop" id="commandPalette" hidden>
       <div class="command-palette" role="dialog" aria-modal="true" aria-label="Commands">
-        <input id="commandInput" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false" aria-label="Search commands">
+        <div id="commandQuickActions" class="command-quick-actions" aria-label="File actions">
+          <button data-quick-command="new" aria-label="New document" title="New document (⌘/Ctrl + N)">
+            <svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M12 12v6M9 15h6"/></svg>
+          </button>
+          <button data-quick-command="open" aria-label="Open file" title="Open file (⌘/Ctrl + O)">
+            <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10l-2 10H5z"/></svg>
+          </button>
+          <button data-quick-command="save" aria-label="Save" title="Save (⌘/Ctrl + S)">
+            <svg viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg>
+          </button>
+          <button data-quick-command="export" aria-label="Export HTML" title="Export HTML (⌘/Ctrl + Shift + E)">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M5 13v7h14v-7"/></svg>
+          </button>
+        </div>
+        <div class="command-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
+          <input id="commandInput" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false" aria-label="Search commands">
+        </div>
         <div id="commandList" class="command-list" role="listbox"></div>
       </div>
     </div>

@@ -1086,10 +1086,6 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   const commands = [
-    { label: 'New document', shortcut: '⌘ N', keywords: 'file create', run: () => requestAction(newDocument) },
-    { label: 'Open file…', shortcut: '⌘ O', keywords: 'file import', run: () => requestAction(openFile) },
-    { label: 'Save', shortcut: '⌘ S', keywords: 'file', run: saveFile },
-    { label: 'Export HTML', shortcut: '⇧⌘ E', keywords: 'file html', run: exportHtml },
     { label: 'Rename document', shortcut: 'F2', keywords: 'title name file', run: () => { commitActiveBlock(); fileName.focus(); fileName.select(); } },
     { label: 'Find in document', shortcut: '⌘ F', keywords: 'search', run: showFind },
     { label: 'Full Markdown source', shortcut: '⌘ /', keywords: 'source code', run: () => toggleSource() },
@@ -1187,6 +1183,18 @@ Open, save, export, and reach recent documents or headings from the command pale
   editor.addEventListener('focusout', () => setTimeout(() => {
     if (activeSourceBlock && $('#commandPalette').hidden && !editor.contains(document.activeElement)) commitActiveBlock();
   }));
+  const quickCommands = {
+    new: () => requestAction(newDocument),
+    open: () => requestAction(openFile),
+    save: saveFile,
+    export: exportHtml
+  };
+  $('#commandQuickActions').addEventListener('click', event => {
+    const button = event.target.closest('[data-quick-command]');
+    const command = button && quickCommands[button.dataset.quickCommand];
+    if (!command) return;
+    closeCommandPalette(false); command(); paletteContext = null;
+  });
   $('#commandButton').addEventListener('click', showCommandPalette);
   document.addEventListener('keydown', handleVimKeydown, true);
   document.addEventListener('pointerup', event => {

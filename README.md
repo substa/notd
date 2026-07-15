@@ -19,7 +19,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - contextual block editing that reveals Markdown source and formats it again when focus moves away;
 - block navigation with arrow keys or `Alt + ↑/↓`;
 - optional persistent Vim mode with Normal/Insert modes, `h/j/k/l`, word and document motions, `Ctrl-D/U`, and undo/redo with `u` and `Ctrl-R`;
-- command palette available with `/` in Vim mode, `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
+- command palette with icon-only quick actions for new, open, save, and export, available with `/` in Vim mode, `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
 - shortcuts for files, search, formatting, navigation, and appearance;
 - visual Markdown editing and full source mode;
 - headings, links, quotes, lists, tasks, code blocks, and tables;
