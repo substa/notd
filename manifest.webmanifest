@@ -1,7 +1,7 @@
 {
   "name": "markd — Markdown editor",
   "short_name": "markd",
-  "description": "Editor Markdown minimale, locale e offline.",
+  "description": "A minimal, local, offline Markdown editor.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",

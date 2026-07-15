@@ -1,35 +1,36 @@
 # markd
 
-Editor Markdown web ispirato all’esperienza minimale di Typora. Non usa framework o servizi esterni: i documenti restano nel browser o sul filesystem dell’utente.
+A web-based Markdown editor inspired by Typora’s minimal writing experience. It uses no frameworks or external services: documents stay in the browser or on the user’s filesystem.
 
-## Avvio locale
+## Run locally
 
 ```bash
 python3 -m http.server 4173
 ```
 
-Aprire [http://localhost:4173](http://localhost:4173).
+Open [http://localhost:4173](http://localhost:4173).
 
-L’app è interamente statica e può essere pubblicata su qualsiasi hosting HTTPS (GitHub Pages, Netlify, Vercel, nginx, ecc.). HTTPS abilita PWA e File System Access API nei browser compatibili.
+The app is entirely static and can be deployed to any HTTPS host, including GitHub Pages, Netlify, Vercel, or nginx. HTTPS enables the PWA and File System Access API in supported browsers.
 
-## Funzioni
+## Features
 
-- interfaccia senza barre: la sidebar appare dal bordo sinistro o con `⌘/Ctrl + Shift + L`;
-- formattazione digitando direttamente la sintassi Markdown (`**grassetto**`, `*corsivo*`, `` `codice` ``);
-- il blocco selezionato mostra la sintassi Markdown, senza sfondo, e torna formattato quando perde il focus;
-- navigazione tra blocchi con frecce o `Alt + ↑/↓`;
-- palette completa richiamabile con `/`, `F1` o `⌘/Ctrl + Shift + P`;
-- scorciatoie per file, ricerca, formattazione, navigazione e aspetto;
-- editor visuale Markdown e modalità sorgente;
-- titoli, link, citazioni, liste, task, codice e tabelle;
-- apertura tramite file picker o drag and drop;
-- salvataggio diretto su Chromium e download `.md` sugli altri browser;
-- copie locali e documenti recenti;
-- indice automatico, ricerca, conteggio parole;
-- temi chiaro, seppia e scuro;
-- esportazione HTML;
-- layout desktop/mobile e funzionamento offline come PWA.
+- distraction-free interface with files, recent documents, outline, themes, and tools collected in the command palette;
+- inline Markdown formatting (`**bold**`, `*italic*`, and `` `code` ``);
+- contextual block editing that reveals Markdown source and formats it again when focus moves away;
+- block navigation with arrow keys or `Alt + ↑/↓`;
+- optional persistent Vim mode with Normal/Insert modes, `h/j/k/l`, word and document motions, `Ctrl-D/U`, and undo/redo with `u` and `Ctrl-R`;
+- command palette available with `/` in Vim mode, `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
+- shortcuts for files, search, formatting, navigation, and appearance;
+- visual Markdown editing and full source mode;
+- headings, links, quotes, lists, tasks, code blocks, and tables;
+- file picker and drag-and-drop opening;
+- direct saving on Chromium and `.md` downloads on other browsers;
+- local copies and recent documents;
+- automatic outline, search, and word count;
+- light, sepia, and dark themes;
+- HTML export;
+- desktop/mobile layouts and offline PWA support.
 
 ## Privacy
 
-Nessun contenuto viene inviato a un server. Le copie automatiche sono memorizzate in `localStorage`; il service worker salva solamente gli asset dell’app per l’uso offline.
+No content is sent to a server. Automatic copies are stored in `localStorage`; the service worker caches only the app’s assets for offline use.

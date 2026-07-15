@@ -15,64 +15,73 @@
 
   let state = {
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
-    currentId: null, pendingAction: null, saveTimer: null
+    vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null
   };
   let activeSourceBlock = null;
   let paletteContext = null;
   let filteredCommands = [];
   let selectedCommand = 0;
-  const WELCOME_VERSION = '6';
+  let vimPending = '';
+  let vimDesiredColumn = null;
+  let vimInsertSnapshot = null;
+  const vimUndoStack = [];
+  const vimRedoStack = [];
+  const WELCOME_VERSION = '11';
 
-  const starter = `# Benvenuto in markd
+  const starter = `# Welcome to markd
 
-markd è un editor **Markdown** minimale: tutto resta nel browser o nei file che scegli di aprire.
+markd is a minimal **Markdown** editor: everything stays in your browser or in the files you choose to open.
 
-## Modifica contestuale
+## Contextual editing
 
-Seleziona un blocco per vedere e modificare il suo codice Markdown. Quando passi a un altro blocco, il contenuto torna automaticamente formattato. Usa **Freccia su/giù** ai confini del testo oppure **Alt + Freccia su/giù** per muoverti tra i blocchi senza usare il mouse.
+Select a block to view and edit its Markdown source. When you move to another block, the content is formatted again automatically. Use **Arrow Up/Down** at the text boundaries or **Alt + Arrow Up/Down** to move between blocks without a mouse.
 
-## Comandi rapidi
+## Quick commands
 
-Digita **/** all’inizio di una riga vuota per aprire i comandi. Puoi anche usare **⌘/Ctrl + Shift + P** da qualsiasi punto. Scrivi il nome di un comando, spostati con le frecce e premi Invio.
+In Vim mode, press **/** to open commands; while typing, use it at the start of an empty line. You can also use **⌘/Ctrl + K** or **⌘/Ctrl + Shift + P** anywhere. Type a command name, move with the arrow keys, and press Enter.
 
-## Sintassi essenziale
+## Vim mode
 
-- \`# Titolo\`, \`## Sottotitolo\`, \`### Sezione\`
-- \`**grassetto**\` e \`*corsivo*\`
-- \`\`codice inline\`\` e \`~~testo barrato~~\`
-- \`- elemento\`, \`1. elemento\` e \`- [ ] attività\`
-- \`> citazione\` e \`---\` per un separatore
-- \`[testo](https://esempio.it)\` per un collegamento
-- Tre backtick per un blocco di codice
+Enable **Vim mode** from the command palette. In Normal mode, use \`h/j/k/l\`, \`w/b/e\`, \`0/$\`, and \`gg/G\` to move; \`Ctrl-D\` and \`Ctrl-U\` jump forward or backward across several blocks. Press \`i\`, \`a\`, \`I\`, \`A\`, \`o\`, or \`O\` to type, and \`Esc\` to return to Normal mode. You can also use \`x\`, \`dd\`, \`D\`, \`C\`, and \`r\` to edit text, \`u\` to undo, and \`Ctrl-R\` to redo.
 
-> Suggerimento: premi Invio dopo un elemento di lista per crearne un altro; Invio su un elemento vuoto termina la lista.
+## Essential syntax
 
-## Scorciatoie da tastiera
+- \`# Heading\`, \`## Subheading\`, \`### Section\`
+- \`**bold**\` and \`*italic*\`
+- \`\`inline code\`\` and \`~~strikethrough~~\`
+- \`- item\`, \`1. item\`, and \`- [ ] task\`
+- \`> quote\` and \`---\` for a divider
+- \`[text](https://example.com)\` for a link
+- Three backticks for a code block
 
-| Scorciatoia | Azione |
+> Tip: press Enter after a list item to create another one; press Enter on an empty item to end the list.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
 | --- | --- |
-| ⌘/Ctrl + N | Nuovo documento |
-| ⌘/Ctrl + O | Apri file |
-| ⌘/Ctrl + S | Salva |
-| ⌘/Ctrl + Shift + E | Esporta HTML |
-| ⌘/Ctrl + F | Trova |
-| ⌘/Ctrl + Shift + L | Mostra o nasconde la sidebar |
-| ⌘/Ctrl + Shift + P oppure F1 | Apre i comandi |
-| F2 | Rinomina il documento |
-| ⌘/Ctrl + / | Mostra il sorgente completo |
-| ⌘/Ctrl + B | Grassetto |
-| ⌘/Ctrl + I | Corsivo |
-| ⌘/Ctrl + K | Collegamento |
-| ⌘/Ctrl + 1, 2, 3 | Titolo 1, 2, 3 |
-| ⌘/Ctrl + Shift + 7 | Elenco numerato |
-| ⌘/Ctrl + Shift + 8 | Elenco puntato |
-| Alt + Freccia su/giù | Blocco precedente o successivo |
-| ⌘/Ctrl + Invio | Conferma il blocco e passa al successivo |
-| Esc | Chiude il comando o conferma il blocco |
+| ⌘/Ctrl + N | New document |
+| ⌘/Ctrl + O | Open file |
+| ⌘/Ctrl + S | Save |
+| ⌘/Ctrl + Shift + E | Export HTML |
+| ⌘/Ctrl + F | Find |
+| ⌘/Ctrl + K, ⌘/Ctrl + Shift + P, or F1 | Open commands |
+| F2 | Rename document |
+| ⌘/Ctrl + / | Show full source |
+| ⌘/Ctrl + B | Bold |
+| ⌘/Ctrl + I | Italic |
+| ⌘/Ctrl + 1, 2, 3 | Heading 1, 2, 3 |
+| ⌘/Ctrl + Shift + 7 | Numbered list |
+| ⌘/Ctrl + Shift + 8 | Bulleted list |
+| Alt + Arrow Up/Down | Previous or next block |
+| Ctrl + D / Ctrl + U (Vim) | Jump forward or backward several blocks |
+| U / Ctrl + R (Vim) | Undo or redo a change |
+| ⌘/Ctrl + Enter | Commit the block and move to the next one |
+| Esc | Close commands or return to Normal mode in Vim |
 
-## File e privacy
+## Files and privacy
 
-Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. Una copia automatica viene conservata localmente; nessun testo viene inviato a server esterni.
+Open, save, export, and reach recent documents or headings from the command palette. An automatic copy is stored locally; no text is sent to external servers.
 `;
 
   function escapeHtml(value = '') {
@@ -282,7 +291,7 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     source.setSelectionRange(offset, offset);
   }
 
-  function moveToAdjacentBlock(direction, createIfMissing = false) {
+  function moveToAdjacentBlock(direction, createIfMissing = false, preferredColumn = null) {
     const source = activeSourceBlock;
     if (!source) return;
     let target = direction < 0 ? source.previousElementSibling : source.nextElementSibling;
@@ -295,10 +304,370 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     activateSourceBlock(target);
     requestAnimationFrame(() => {
       if (!activeSourceBlock) return;
-      const offset = direction < 0 ? activeSourceBlock.value.length : 0;
-      activeSourceBlock.setSelectionRange(offset, offset);
+      let offset = direction < 0 ? activeSourceBlock.value.length : 0;
+      if (preferredColumn !== null) {
+        const value = activeSourceBlock.value;
+        const lineStart = direction < 0 ? value.lastIndexOf('\n') + 1 : 0;
+        const lineEnd = direction < 0 ? value.length : (value.indexOf('\n') < 0 ? value.length : value.indexOf('\n'));
+        offset = lineStart + Math.min(preferredColumn, Math.max(0, lineEnd - lineStart - 1));
+      }
+      if (state.vimEnabled && state.vimMode === 'normal') showVimCursor(activeSourceBlock, offset);
+      else activeSourceBlock.setSelectionRange(offset, offset);
       activeSourceBlock.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
+  }
+
+  function vimField() {
+    if (activeSourceBlock?.isConnected) return activeSourceBlock;
+    return state.sourceMode ? sourceEditor : null;
+  }
+
+  function captureVimSnapshot(field = vimField()) {
+    return {
+      markdown: currentMarkdown(),
+      blockIndex: field === activeSourceBlock ? [...editor.children].indexOf(field) : 0,
+      cursor: field?.selectionStart || 0
+    };
+  }
+
+  function pushVimSnapshot(stack, snapshot) {
+    if (!snapshot || stack[stack.length - 1]?.markdown === snapshot.markdown) return;
+    stack.push(snapshot);
+    if (stack.length > 100) stack.shift();
+  }
+
+  function recordVimChange(field) {
+    pushVimSnapshot(vimUndoStack, captureVimSnapshot(field));
+    vimRedoStack.length = 0;
+  }
+
+  function finishVimInsertChange(field = vimField()) {
+    if (!vimInsertSnapshot) return;
+    const snapshot = vimInsertSnapshot;
+    vimInsertSnapshot = null;
+    if (snapshot.markdown !== currentMarkdown()) {
+      pushVimSnapshot(vimUndoStack, snapshot);
+      vimRedoStack.length = 0;
+    }
+  }
+
+  function restoreVimSnapshot(snapshot) {
+    vimInsertSnapshot = null;
+    state.vimMode = 'normal';
+    vimPending = '';
+    vimDesiredColumn = null;
+    if (state.sourceMode) {
+      sourceEditor.value = snapshot.markdown;
+      setVimMode('normal', sourceEditor, snapshot.cursor);
+    } else {
+      activeSourceBlock = null;
+      editor.innerHTML = markdownToHtml(snapshot.markdown);
+      const blocks = [...editor.children];
+      const block = blocks[Math.max(0, Math.min(snapshot.blockIndex, blocks.length - 1))];
+      if (block) {
+        activateSourceBlock(block);
+        requestAnimationFrame(() => activeSourceBlock && showVimCursor(activeSourceBlock, snapshot.cursor));
+      } else focusVimEditor();
+    }
+    changed(); updateStats(); updateOutline();
+  }
+
+  function applyVimHistory(redo = false) {
+    const source = redo ? vimRedoStack : vimUndoStack;
+    const destination = redo ? vimUndoStack : vimRedoStack;
+    const snapshot = source.pop();
+    if (!snapshot) { toast(redo ? 'Nothing to redo' : 'Nothing to undo'); return; }
+    pushVimSnapshot(destination, captureVimSnapshot());
+    restoreVimSnapshot(snapshot);
+  }
+
+  function vimLineBounds(field, position = field.selectionStart) {
+    const start = field.value.lastIndexOf('\n', Math.max(0, position - 1)) + 1;
+    const nextBreak = field.value.indexOf('\n', position);
+    return { start, end: nextBreak < 0 ? field.value.length : nextBreak };
+  }
+
+  function showVimCursor(field, position = field.selectionStart) {
+    if (!field?.isConnected) return;
+    const maximum = field.value.endsWith('\n') ? field.value.length : Math.max(0, field.value.length - 1);
+    const cursor = Math.max(0, Math.min(position, maximum));
+    field.setSelectionRange(cursor, Math.min(cursor + 1, field.value.length));
+  }
+
+  function updateVimUi() {
+    const status = $('#vimStatus');
+    status.hidden = !state.vimEnabled;
+    const pending = vimPending ? ` ${vimPending}` : '';
+    status.textContent = state.vimMode === 'insert' ? '-- INSERT --' : `-- NORMAL --${pending}`;
+    app.classList.toggle('vim-enabled', state.vimEnabled);
+  }
+
+  function setVimMode(mode, field = vimField(), cursor = null) {
+    if (mode === 'normal' && state.vimMode === 'insert') finishVimInsertChange(field);
+    if (mode === 'insert' && state.vimMode !== 'insert' && !vimInsertSnapshot) vimInsertSnapshot = captureVimSnapshot(field);
+    state.vimMode = mode;
+    vimPending = '';
+    vimDesiredColumn = null;
+    $$('.md-source-block, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert'));
+    if (field?.isConnected) {
+      field.classList.add(mode === 'normal' ? 'vim-normal' : 'vim-insert');
+      field.focus();
+      if (mode === 'normal') showVimCursor(field, cursor ?? field.selectionStart);
+      else {
+        const position = cursor ?? field.selectionStart;
+        field.setSelectionRange(position, position);
+      }
+    }
+    updateVimUi();
+  }
+
+  function focusVimEditor() {
+    if (!state.vimEnabled) return;
+    if (state.sourceMode) { setVimMode(state.vimMode, sourceEditor); return; }
+    if (activeSourceBlock) { setVimMode(state.vimMode, activeSourceBlock); return; }
+    let block = editor.firstElementChild;
+    if (!block) {
+      block = document.createElement('p'); block.append(document.createElement('br')); editor.append(block);
+    }
+    activateSourceBlock(block);
+  }
+
+  function setVimEnabled(enabled = !state.vimEnabled, refocus = true) {
+    if (state.vimEnabled && state.vimMode === 'insert') finishVimInsertChange();
+    state.vimEnabled = enabled;
+    state.vimMode = 'normal';
+    vimPending = '';
+    $$('.md-source-block, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert'));
+    updateVimUi();
+    saveSettings({ vimEnabled: enabled });
+    if (enabled && refocus) requestAnimationFrame(focusVimEditor);
+    if (!enabled) {
+      const field = vimField();
+      if (field) {
+        field.setSelectionRange(field.selectionStart, field.selectionStart);
+        if (refocus) field.focus();
+      } else if (refocus) editor.focus();
+    }
+    if (refocus) toast(enabled ? 'Vim mode enabled' : 'Vim mode disabled');
+  }
+
+  function replaceVimRange(field, start, end, text = '', record = true) {
+    if (record && (start !== end || text)) recordVimChange(field);
+    field.setRangeText(text, start, end, 'start');
+    notifyMarkdownField(field);
+  }
+
+  function vimWordKind(character) {
+    if (!character || /\s/.test(character)) return 'space';
+    return /[\p{L}\p{N}_]/u.test(character) ? 'word' : 'symbol';
+  }
+
+  function nextVimWord(value, position) {
+    let cursor = Math.min(position + 1, value.length);
+    const kind = vimWordKind(value[position]);
+    while (cursor < value.length && kind !== 'space' && vimWordKind(value[cursor]) === kind) cursor++;
+    while (cursor < value.length && vimWordKind(value[cursor]) === 'space') cursor++;
+    return cursor;
+  }
+
+  function previousVimWord(value, position) {
+    let cursor = Math.max(0, position - 1);
+    while (cursor > 0 && vimWordKind(value[cursor]) === 'space') cursor--;
+    const kind = vimWordKind(value[cursor]);
+    while (cursor > 0 && vimWordKind(value[cursor - 1]) === kind) cursor--;
+    return cursor;
+  }
+
+  function endVimWord(value, position) {
+    let cursor = position;
+    if (cursor < value.length - 1 && vimWordKind(value[cursor + 1]) === vimWordKind(value[cursor]) && vimWordKind(value[cursor]) !== 'space') cursor++;
+    else {
+      cursor++;
+      while (cursor < value.length && vimWordKind(value[cursor]) === 'space') cursor++;
+    }
+    const kind = vimWordKind(value[cursor]);
+    while (cursor < value.length - 1 && vimWordKind(value[cursor + 1]) === kind) cursor++;
+    return cursor;
+  }
+
+  function moveVimVertically(field, direction, firstNonBlank = false) {
+    const bounds = vimLineBounds(field);
+    const column = vimDesiredColumn ?? field.selectionStart - bounds.start;
+    vimDesiredColumn = column;
+    let targetStart;
+    if (direction < 0) {
+      if (bounds.start === 0) {
+        if (field === activeSourceBlock) moveToAdjacentBlock(-1, false, column);
+        return;
+      }
+      const previousEnd = bounds.start - 1;
+      targetStart = field.value.lastIndexOf('\n', Math.max(0, previousEnd - 1)) + 1;
+    } else {
+      if (bounds.end === field.value.length) {
+        if (field === activeSourceBlock) moveToAdjacentBlock(1, false, column);
+        return;
+      }
+      targetStart = bounds.end + 1;
+    }
+    const targetBreak = field.value.indexOf('\n', targetStart);
+    const targetEnd = targetBreak < 0 ? field.value.length : targetBreak;
+    let target = targetStart + Math.min(column, Math.max(0, targetEnd - targetStart - 1));
+    if (firstNonBlank) target = targetStart + (field.value.slice(targetStart, targetEnd).match(/^\s*/)?.[0].length || 0);
+    showVimCursor(field, target);
+  }
+
+  function moveVimByPage(field, direction) {
+    const bounds = vimLineBounds(field);
+    const column = field.selectionStart - bounds.start;
+    if (field === sourceEditor) {
+      const lines = field.value.split('\n');
+      const currentLine = field.value.slice(0, bounds.start).split('\n').length - 1;
+      const lineHeight = parseFloat(getComputedStyle(field).lineHeight) || 24;
+      const jump = Math.max(5, Math.floor(markdWrap.clientHeight / lineHeight / 2));
+      const targetLine = Math.max(0, Math.min(lines.length - 1, currentLine + direction * jump));
+      const lineStart = lines.slice(0, targetLine).reduce((total, line) => total + line.length + 1, 0);
+      showVimCursor(field, lineStart + Math.min(column, Math.max(0, lines[targetLine].length - 1)));
+      centerCaret(); return;
+    }
+    const blocks = [...editor.children];
+    const currentIndex = blocks.indexOf(activeSourceBlock);
+    if (currentIndex < 0) return;
+    const target = blocks[Math.max(0, Math.min(blocks.length - 1, currentIndex + direction * 5))];
+    if (!target || target === activeSourceBlock) return;
+    commitActiveBlock();
+    if (!target.isConnected) return;
+    activateSourceBlock(target);
+    requestAnimationFrame(() => {
+      if (!activeSourceBlock) return;
+      showVimCursor(activeSourceBlock, Math.min(column, Math.max(0, vimLineBounds(activeSourceBlock, 0).end - 1)));
+      activeSourceBlock.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }
+
+  function moveVimToDocumentEdge(field, end) {
+    if (field === sourceEditor) {
+      const position = end ? vimLineBounds(field, field.value.length).start : 0;
+      showVimCursor(field, position); centerCaret(); return;
+    }
+    const source = activeSourceBlock;
+    if (!source) return;
+    const target = end ? editor.lastElementChild : editor.firstElementChild;
+    if (!target || target === source) { showVimCursor(field, end ? field.value.length - 1 : 0); return; }
+    commitActiveBlock(); activateSourceBlock(end ? editor.lastElementChild : editor.firstElementChild);
+    requestAnimationFrame(() => {
+      if (!activeSourceBlock) return;
+      const position = end ? vimLineBounds(activeSourceBlock, activeSourceBlock.value.length).start : 0;
+      showVimCursor(activeSourceBlock, position);
+      activeSourceBlock.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }
+
+  function deleteVimLine(field) {
+    const bounds = vimLineBounds(field);
+    let start = bounds.start; let end = bounds.end;
+    if (end < field.value.length) end++;
+    else if (start > 0) start--;
+    replaceVimRange(field, start, end);
+    showVimCursor(field, Math.min(start, field.value.length - 1));
+  }
+
+  function processVimNormalKey(field, key) {
+    const value = field.value;
+    const position = field.selectionStart;
+    const bounds = vimLineBounds(field, position);
+    const finish = target => { vimPending = ''; vimDesiredColumn = null; showVimCursor(field, target); updateVimUi(); };
+
+    if (vimPending === 'g') {
+      vimPending = '';
+      if (key === 'g') moveVimToDocumentEdge(field, false);
+      updateVimUi(); return;
+    }
+    if (vimPending === 'd') {
+      vimPending = '';
+      if (key === 'd') deleteVimLine(field);
+      else if (key === 'w') { replaceVimRange(field, position, nextVimWord(value, position)); showVimCursor(field, position); }
+      else if (key === '$') { replaceVimRange(field, position, bounds.end); showVimCursor(field, position); }
+      updateVimUi(); return;
+    }
+    if (vimPending === 'r') {
+      vimPending = '';
+      if (key.length === 1 && position < value.length && value[position] !== '\n') {
+        replaceVimRange(field, position, position + 1, key); showVimCursor(field, position);
+      }
+      updateVimUi(); return;
+    }
+
+    if (key === 'Ctrl+d') { moveVimByPage(field, 1); return; }
+    if (key === 'Ctrl+u') { moveVimByPage(field, -1); return; }
+    if (key === 'u') { applyVimHistory(false); return; }
+    if (key === 'Ctrl+r') { applyVimHistory(true); return; }
+
+    if (key !== 'j' && key !== 'k' && key !== 'ArrowDown' && key !== 'ArrowUp') vimDesiredColumn = null;
+    if (key === 'h' || key === 'ArrowLeft') finish(Math.max(bounds.start, position - 1));
+    else if (key === 'l' || key === 'ArrowRight') finish(Math.min(Math.max(bounds.start, bounds.end - 1), position + 1));
+    else if (key === 'j' || key === 'ArrowDown') moveVimVertically(field, 1);
+    else if (key === 'k' || key === 'ArrowUp') moveVimVertically(field, -1);
+    else if (key === 'w') finish(nextVimWord(value, position));
+    else if (key === 'b') finish(previousVimWord(value, position));
+    else if (key === 'e') finish(endVimWord(value, position));
+    else if (key === '0' || key === 'Home') finish(bounds.start);
+    else if (key === '^') finish(bounds.start + (value.slice(bounds.start, bounds.end).match(/^\s*/)?.[0].length || 0));
+    else if (key === '$' || key === 'End') finish(Math.max(bounds.start, bounds.end - 1));
+    else if (key === 'g') { vimPending = 'g'; updateVimUi(); }
+    else if (key === 'G') moveVimToDocumentEdge(field, true);
+    else if (key === 'Enter') moveVimVertically(field, 1, true);
+    else if (key === 'i') setVimMode('insert', field, position);
+    else if (key === 'a') setVimMode('insert', field, Math.min(position + (value[position] === '\n' ? 0 : 1), value.length));
+    else if (key === 'I') setVimMode('insert', field, bounds.start + (value.slice(bounds.start, bounds.end).match(/^\s*/)?.[0].length || 0));
+    else if (key === 'A') setVimMode('insert', field, bounds.end);
+    else if (key === 'o' || key === 'O') {
+      const insertion = key === 'o' ? bounds.end : bounds.start;
+      vimInsertSnapshot = captureVimSnapshot(field);
+      replaceVimRange(field, insertion, insertion, '\n', false);
+      setVimMode('insert', field, key === 'o' ? insertion + 1 : insertion);
+    } else if (key === 'x' || key === 'Delete') {
+      if (position < value.length && value[position] !== '\n') replaceVimRange(field, position, position + 1);
+      showVimCursor(field, Math.min(position, field.value.length - 1));
+    } else if (key === 'X' || key === 'Backspace') {
+      if (position > bounds.start) replaceVimRange(field, position - 1, position);
+      showVimCursor(field, Math.max(bounds.start, position - 1));
+    } else if (key === 'd') { vimPending = 'd'; updateVimUi(); }
+    else if (key === 'D' || key === 'C') {
+      if (key === 'C') vimInsertSnapshot = captureVimSnapshot(field);
+      replaceVimRange(field, position, bounds.end, '', key !== 'C');
+      if (key === 'C') setVimMode('insert', field, position); else showVimCursor(field, position);
+    } else if (key === 'r') { vimPending = 'r'; updateVimUi(); }
+    else if (key === '/') showCommandPalette();
+    else if (key === ':') showCommandPalette();
+  }
+
+  function handleVimKeydown(event) {
+    if (!state.vimEnabled || !$('#commandPalette').hidden || !$('#confirmDialog').hidden) return;
+    const field = event.target === sourceEditor ? sourceEditor : (event.target === activeSourceBlock ? activeSourceBlock : null);
+    const ctrlEscape = event.ctrlKey && event.key === '[';
+    const ctrlCommand = event.ctrlKey && !event.metaKey && !event.altKey && ['d', 'u', 'r'].includes(event.key.toLowerCase());
+    const vimKey = ctrlCommand ? `Ctrl+${event.key.toLowerCase()}` : event.key;
+    if (state.vimMode === 'insert') {
+      if (!field || (event.key !== 'Escape' && !ctrlEscape)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      const position = Math.max(0, (field?.selectionStart || 0) - 1);
+      setVimMode('normal', field, position); return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+      if (!ctrlEscape && !ctrlCommand) return;
+    }
+    const handledKey = event.key.length === 1 || ['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'Backspace', 'Delete'].includes(event.key);
+    if (!handledKey) return;
+    if (!field && (event.target === editor || editor.contains(event.target))) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      focusVimEditor();
+      requestAnimationFrame(() => { const active = vimField(); if (active && event.key !== 'Escape') processVimNormalKey(active, vimKey); });
+      return;
+    }
+    if (!field) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (event.key === 'Escape' || ctrlEscape) { vimPending = ''; updateVimUi(); return; }
+    processVimNormalKey(field, vimKey);
   }
 
   function handleSourceBlockKeydown(event) {
@@ -347,13 +716,20 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     block.replaceWith(source);
     activeSourceBlock = source;
     resizeSourceBlock(source);
-    requestAnimationFrame(() => placeCaretInSource(source, pointer?.x ?? -1, pointer?.y ?? -1));
+    requestAnimationFrame(() => {
+      placeCaretInSource(source, pointer?.x ?? -1, pointer?.y ?? -1);
+      if (state.vimEnabled) setVimMode(state.vimMode, source, source.selectionStart);
+    });
   }
 
   function commitActiveBlock() {
     const source = activeSourceBlock;
     if (!source) return;
+    if (state.vimEnabled && state.vimMode === 'insert') finishVimInsertChange(source);
     activeSourceBlock = null;
+    if (state.vimEnabled) {
+      state.vimMode = 'normal'; vimPending = ''; vimDesiredColumn = null; updateVimUi();
+    }
     if (!source.isConnected) return;
     const container = document.createElement('div');
     container.innerHTML = markdownToHtml(sourceBlockText(source));
@@ -365,9 +741,10 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     updateOutline();
   }
 
-  function loadMarkdown(markdown, name = 'Senza titolo', options = {}) {
+  function loadMarkdown(markdown, name = 'Untitled', options = {}) {
     state.markdown = markdown;
     activeSourceBlock = null;
+    vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null;
     state.fileHandle = options.handle || null;
     state.currentId = options.id || crypto.randomUUID?.() || String(Date.now());
     state.dirty = false;
@@ -376,17 +753,17 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     fileName.value = name.replace(/\.(md|markdown|txt)$/i, '');
     document.title = `${fileName.value} — markd`;
     app.classList.remove('dirty');
-    updateStats(); updateOutline(); persistLocal(false); renderRecents();
-    saveState.textContent = 'Pronto';
-    requestAnimationFrame(() => editor.focus());
+    updateStats(); updateOutline(); persistLocal(false);
+    saveState.textContent = 'Ready';
+    requestAnimationFrame(() => state.vimEnabled ? focusVimEditor() : editor.focus());
   }
 
   function changed() {
     state.dirty = true;
     state.markdown = currentMarkdown();
     app.classList.add('dirty');
-    saveState.textContent = 'Modificato';
-    document.title = `• ${fileName.value || 'Senza titolo'} — markd`;
+    saveState.textContent = 'Modified';
+    document.title = `• ${fileName.value || 'Untitled'} — markd`;
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => { persistLocal(true); updateStats(); updateOutline(); }, 450);
   }
@@ -398,48 +775,31 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
   function persistLocal(showStatus = true) {
     if (!state.currentId) return;
     const docs = getStoredDocs().filter(d => d.id !== state.currentId);
-    docs.unshift({ id: state.currentId, name: fileName.value || 'Senza titolo', markdown: currentMarkdown(), updated: Date.now() });
+    docs.unshift({ id: state.currentId, name: fileName.value || 'Untitled', markdown: currentMarkdown(), updated: Date.now() });
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(docs.slice(0, 10)));
-      if (showStatus) { saveState.textContent = 'Copia locale salvata'; $('#storageStatus').innerHTML = '<i class="status-dot"></i> Salvato in locale'; }
-      renderRecents();
-    } catch { $('#storageStatus').textContent = 'Spazio locale esaurito'; }
-  }
-
-  function renderRecents() {
-    const container = $('#recentFiles');
-    const docs = getStoredDocs();
-    if (!docs.length) { container.innerHTML = '<div class="empty-state">I documenti aperti di recente<br>appariranno qui.</div>'; return; }
-    container.innerHTML = docs.map(doc => `<div class="recent-item${doc.id === state.currentId ? ' active' : ''}" data-id="${escapeHtml(doc.id)}" role="button" tabindex="0">
-      <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5"/></svg>
-      <div class="recent-meta"><div class="recent-name">${escapeHtml(doc.name)}</div><div class="recent-date">${relativeDate(doc.updated)}</div></div>
-      <button class="recent-remove" aria-label="Rimuovi">×</button></div>`).join('');
+      if (showStatus) saveState.textContent = 'Local copy saved';
+    } catch { saveState.textContent = 'Local storage is full'; }
   }
 
   function relativeDate(time) {
     const seconds = Math.floor((Date.now() - time) / 1000);
-    if (seconds < 60) return 'adesso';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} min fa`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h fa`;
-    return new Intl.DateTimeFormat('it', { day: 'numeric', month: 'short' }).format(time);
+    if (seconds < 60) return 'now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hr ago`;
+    return new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short' }).format(time);
   }
 
   function updateStats() {
     const text = currentMarkdown().replace(/```[\s\S]*?```|[#>*_`~\[\]()|\-]/g, ' ').trim();
     const words = text ? text.split(/\s+/).length : 0;
     const chars = text.replace(/\s/g, '').length;
-    $('#wordCount').textContent = `${words} ${words === 1 ? 'parola' : 'parole'} · ${chars} caratteri`;
+    $('#wordCount').textContent = `${words} ${words === 1 ? 'word' : 'words'} · ${chars} characters`;
   }
 
   function updateOutline() {
-    if (state.sourceMode) {
-      const headings = [...sourceEditor.value.matchAll(/^(#{1,6})\s+(.+)$/gm)];
-      $('#outline').innerHTML = headings.length ? headings.map((m, i) => `<a href="#" class="level-${m[1].length}" data-source-line="${sourceEditor.value.slice(0, m.index).split('\n').length}">${escapeHtml(m[2].replace(/[*_`]/g, ''))}</a>`).join('') : '<div class="outline-empty">Aggiungi un titolo per creare l’indice.</div>';
-      return;
-    }
-    const headings = $$('h1,h2,h3,h4,h5,h6', editor);
-    headings.forEach((h, i) => h.id = `heading-${i}`);
-    $('#outline').innerHTML = headings.length ? headings.map(h => `<a href="#${h.id}" class="level-${h.tagName[1]}">${escapeHtml(h.textContent)}</a>`).join('') : '<div class="outline-empty">Aggiungi un titolo per creare l’indice.</div>';
+    if (state.sourceMode) return;
+    $$('h1,h2,h3,h4,h5,h6', editor).forEach((heading, index) => heading.id = `heading-${index}`);
   }
 
   function toast(message) {
@@ -454,12 +814,12 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
         const file = await handle.getFile();
         loadMarkdown(await file.text(), file.name, { handle });
       } else fileInput.click();
-    } catch (error) { if (error.name !== 'AbortError') toast('Impossibile aprire il file'); }
+    } catch (error) { if (error.name !== 'AbortError') toast('Could not open the file'); }
   }
 
   async function saveFile() {
     let markdown = currentMarkdown();
-    let name = (fileName.value.trim() || 'Senza titolo').replace(/\.(md|markdown)$/i, '') + '.md';
+    let name = (fileName.value.trim() || 'Untitled').replace(/\.(md|markdown)$/i, '') + '.md';
     try {
       if (state.fileHandle) {
         const writable = await state.fileHandle.createWritable();
@@ -472,9 +832,9 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
         downloadBlob(markdown, name, 'text/markdown');
       }
       state.markdown = markdown; state.dirty = false; app.classList.remove('dirty');
-      document.title = `${fileName.value} — markd`; saveState.textContent = 'Salvato'; persistLocal(false); toast('Documento salvato');
+      document.title = `${fileName.value} — markd`; saveState.textContent = 'Saved'; persistLocal(false); toast('Document saved');
       return true;
-    } catch (error) { if (error.name !== 'AbortError') toast('Salvataggio non riuscito'); return false; }
+    } catch (error) { if (error.name !== 'AbortError') toast('Could not save the document'); return false; }
   }
 
   function downloadBlob(content, name, type) {
@@ -488,7 +848,7 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     state.pendingAction = action; $('#confirmDialog').hidden = false;
   }
 
-  function newDocument() { loadMarkdown('', 'Senza titolo'); }
+  function newDocument() { loadMarkdown('', 'Untitled'); }
 
   function toggleSource(force) {
     const shouldEnable = typeof force === 'boolean' ? force : !state.sourceMode;
@@ -496,24 +856,26 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     if (shouldEnable) { commitActiveBlock(); sourceEditor.value = editorToMarkdown(); editor.hidden = true; sourceEditor.hidden = false; }
     else { editor.innerHTML = markdownToHtml(sourceEditor.value); sourceEditor.hidden = true; editor.hidden = false; }
     state.sourceMode = shouldEnable; app.classList.toggle('source-mode', shouldEnable);
-    updateStats(); updateOutline(); (shouldEnable ? sourceEditor : editor).focus();
+    updateStats(); updateOutline();
+    if (state.vimEnabled) requestAnimationFrame(focusVimEditor);
+    else (shouldEnable ? sourceEditor : editor).focus();
   }
 
   function applyInlineTag(tag) {
     const selection = getSelection();
-    if (!selection.rangeCount || selection.isCollapsed) return toast('Seleziona prima del testo');
+    if (!selection.rangeCount || selection.isCollapsed) return toast('Select some text first');
     const range = selection.getRangeAt(0);
     if (!editor.contains(range.commonAncestorContainer)) return;
     const element = document.createElement(tag);
-    try { range.surroundContents(element); selection.removeAllRanges(); selection.addRange(range); changed(); } catch { toast('Non è possibile formattare questa selezione'); }
+    try { range.surroundContents(element); selection.removeAllRanges(); selection.addRange(range); changed(); } catch { toast('This selection cannot be formatted'); }
   }
 
   function addLink() {
     if (state.sourceMode) return wrapSource('[', '](https://)');
     const selection = getSelection();
     const label = selection.toString();
-    if (!label) return toast('Seleziona il testo da collegare');
-    const url = prompt('Indirizzo del collegamento:', 'https://');
+    if (!label) return toast('Select the text to link');
+    const url = prompt('Link address:', 'https://');
     if (url) { document.execCommand('createLink', false, url); changed(); }
   }
 
@@ -653,9 +1015,9 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
 
   function exportHtml() {
     const body = markdownToHtml(currentMarkdown());
-    const title = escapeHtml(fileName.value || 'Documento');
-    const page = `<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{max-width:760px;margin:60px auto;padding:0 24px;color:#333;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}h1{border-bottom:1px solid #ddd}a{color:#4183c4}blockquote{border-left:3px solid #ddd;padding-left:18px;color:#777}code,pre{font-family:monospace;background:#f5f5f5;border-radius:4px}code{padding:2px 4px}pre{padding:16px;overflow:auto}pre code{padding:0}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:7px}img{max-width:100%}</style><body>${body}</body></html>`;
-    downloadBlob(page, `${fileName.value || 'documento'}.html`, 'text/html'); toast('HTML esportato');
+    const title = escapeHtml(fileName.value || 'Document');
+    const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{max-width:760px;margin:60px auto;padding:0 24px;color:#333;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}h1{border-bottom:1px solid #ddd}a{color:#4183c4}blockquote{border-left:3px solid #ddd;padding-left:18px;color:#777}code,pre{font-family:monospace;background:#f5f5f5;border-radius:4px}code{padding:2px 4px}pre{padding:16px;overflow:auto}pre code{padding:0}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:7px}img{max-width:100%}</style><body>${body}</body></html>`;
+    downloadBlob(page, `${fileName.value || 'document'}.html`, 'text/html'); toast('HTML exported');
   }
 
   function activeMarkdownField() {
@@ -695,7 +1057,7 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
   function transformMarkdownBlock(transform) {
     withMarkdownField(field => {
       const range = fieldRange(field); const selected = field.value.slice(range.start, range.end);
-      const replacement = transform(selected || 'testo');
+      const replacement = transform(selected || 'text');
       field.setRangeText(replacement, range.start, range.end, 'select');
       notifyMarkdownField(field);
     });
@@ -712,7 +1074,7 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     transformMarkdownBlock(text => `${'#'.repeat(level)} ${text.replace(/^#{1,6}\s+/, '').trim()}`);
   }
 
-  function wrapMarkdownSelection(before, after = before, placeholder = 'testo') {
+  function wrapMarkdownSelection(before, after = before, placeholder = 'text') {
     withMarkdownField(field => {
       const start = field.selectionStart; const end = field.selectionEnd;
       const selected = field.value.slice(start, end) || placeholder;
@@ -724,45 +1086,78 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
   }
 
   const commands = [
-    { label: 'Nuovo documento', shortcut: '⌘ N', keywords: 'file crea', run: () => requestAction(newDocument) },
-    { label: 'Apri file…', shortcut: '⌘ O', keywords: 'file importa', run: () => requestAction(openFile) },
-    { label: 'Salva', shortcut: '⌘ S', keywords: 'file', run: saveFile },
-    { label: 'Esporta HTML', shortcut: '⇧⌘ E', keywords: 'file html', run: exportHtml },
-    { label: 'Rinomina documento', shortcut: 'F2', keywords: 'titolo nome file', run: () => { commitActiveBlock(); fileName.focus(); fileName.select(); } },
-    { label: 'Trova nel documento', shortcut: '⌘ F', keywords: 'cerca', run: showFind },
-    { label: 'Mostra o nascondi sidebar', shortcut: '⇧⌘ L', keywords: 'pannello recenti', run: () => toggleSidebar() },
-    { label: 'Mostra documenti recenti', keywords: 'sidebar file', run: () => showSidebarTab('files') },
-    { label: 'Mostra indice', keywords: 'sidebar titoli outline', run: () => showSidebarTab('outline') },
-    { label: 'Sorgente Markdown completo', shortcut: '⌘ /', keywords: 'codice', run: () => toggleSource() },
-    { label: 'Testo normale', keywords: 'paragrafo paragraph', run: () => transformMarkdownBlock(text => text.replace(/^#{1,6}\s+/, '').replace(/^>\s+/gm, '')) },
-    { label: 'Titolo 1', shortcut: '⌘ 1', keywords: 'heading h1', run: () => headingCommand(1) },
-    { label: 'Titolo 2', shortcut: '⌘ 2', keywords: 'heading h2', run: () => headingCommand(2) },
-    { label: 'Titolo 3', shortcut: '⌘ 3', keywords: 'heading h3', run: () => headingCommand(3) },
-    { label: 'Grassetto', shortcut: '⌘ B', keywords: 'bold', run: () => wrapMarkdownSelection('**') },
-    { label: 'Corsivo', shortcut: '⌘ I', keywords: 'italic', run: () => wrapMarkdownSelection('*') },
-    { label: 'Codice inline', shortcut: '⌘ `', keywords: 'code', run: () => wrapMarkdownSelection('`') },
-    { label: 'Testo barrato', keywords: 'strike', run: () => wrapMarkdownSelection('~~') },
-    { label: 'Collegamento', shortcut: '⌘ K', keywords: 'link url', run: () => wrapMarkdownSelection('[', '](https://)', 'testo') },
-    { label: 'Immagine', keywords: 'foto image url', run: () => wrapMarkdownSelection('![', '](https://)', 'descrizione') },
-    { label: 'Elenco puntato', shortcut: '⇧⌘ 8', keywords: 'lista bullet', run: () => prefixMarkdownLines('- ') },
-    { label: 'Elenco numerato', shortcut: '⇧⌘ 7', keywords: 'lista ordered', run: () => prefixMarkdownLines('', true) },
-    { label: 'Attività', keywords: 'task checkbox', run: () => prefixMarkdownLines('- [ ] ') },
-    { label: 'Citazione', keywords: 'quote blockquote', run: () => prefixMarkdownLines('> ') },
-    { label: 'Blocco di codice', keywords: 'code fence', run: () => transformMarkdownBlock(text => `\`\`\`\n${text}\n\`\`\``) },
-    { label: 'Tabella', keywords: 'table righe colonne', run: () => transformMarkdownBlock(() => '| Colonna 1 | Colonna 2 |\n| --- | --- |\n| Cella | Cella |') },
-    { label: 'Separatore', keywords: 'linea hr', run: () => transformMarkdownBlock(() => '---') },
-    { label: 'Tema chiaro', keywords: 'aspetto light', run: () => setTheme('light') },
-    { label: 'Tema seppia', keywords: 'aspetto sepia', run: () => setTheme('sepia') },
-    { label: 'Tema scuro', keywords: 'aspetto dark', run: () => setTheme('dark') }
+    { label: 'New document', shortcut: '⌘ N', keywords: 'file create', run: () => requestAction(newDocument) },
+    { label: 'Open file…', shortcut: '⌘ O', keywords: 'file import', run: () => requestAction(openFile) },
+    { label: 'Save', shortcut: '⌘ S', keywords: 'file', run: saveFile },
+    { label: 'Export HTML', shortcut: '⇧⌘ E', keywords: 'file html', run: exportHtml },
+    { label: 'Rename document', shortcut: 'F2', keywords: 'title name file', run: () => { commitActiveBlock(); fileName.focus(); fileName.select(); } },
+    { label: 'Find in document', shortcut: '⌘ F', keywords: 'search', run: showFind },
+    { label: 'Full Markdown source', shortcut: '⌘ /', keywords: 'source code', run: () => toggleSource() },
+    { label: 'Toggle Vim mode', keywords: 'vim keyboard normal insert', run: () => setVimEnabled() },
+    { label: 'Normal text', keywords: 'paragraph', run: () => transformMarkdownBlock(text => text.replace(/^#{1,6}\s+/, '').replace(/^>\s+/gm, '')) },
+    { label: 'Heading 1', shortcut: '⌘ 1', keywords: 'heading h1', run: () => headingCommand(1) },
+    { label: 'Heading 2', shortcut: '⌘ 2', keywords: 'heading h2', run: () => headingCommand(2) },
+    { label: 'Heading 3', shortcut: '⌘ 3', keywords: 'heading h3', run: () => headingCommand(3) },
+    { label: 'Bold', shortcut: '⌘ B', keywords: 'bold', run: () => wrapMarkdownSelection('**') },
+    { label: 'Italic', shortcut: '⌘ I', keywords: 'italic', run: () => wrapMarkdownSelection('*') },
+    { label: 'Inline code', shortcut: '⌘ `', keywords: 'code', run: () => wrapMarkdownSelection('`') },
+    { label: 'Strikethrough', keywords: 'strike', run: () => wrapMarkdownSelection('~~') },
+    { label: 'Link', keywords: 'link url', run: () => wrapMarkdownSelection('[', '](https://)', 'text') },
+    { label: 'Image', keywords: 'photo image url', run: () => wrapMarkdownSelection('![', '](https://)', 'description') },
+    { label: 'Bulleted list', shortcut: '⇧⌘ 8', keywords: 'list bullet', run: () => prefixMarkdownLines('- ') },
+    { label: 'Numbered list', shortcut: '⇧⌘ 7', keywords: 'list ordered', run: () => prefixMarkdownLines('', true) },
+    { label: 'Task', keywords: 'task checkbox', run: () => prefixMarkdownLines('- [ ] ') },
+    { label: 'Quote', keywords: 'quote blockquote', run: () => prefixMarkdownLines('> ') },
+    { label: 'Code block', keywords: 'code fence', run: () => transformMarkdownBlock(text => `\`\`\`\n${text}\n\`\`\``) },
+    { label: 'Table', keywords: 'table rows columns', run: () => transformMarkdownBlock(() => '| Column 1 | Column 2 |\n| --- | --- |\n| Cell | Cell |') },
+    { label: 'Divider', keywords: 'separator line hr', run: () => transformMarkdownBlock(() => '---') },
+    { label: 'Light theme', keywords: 'appearance light', run: () => setTheme('light') },
+    { label: 'Sepia theme', keywords: 'appearance sepia', run: () => setTheme('sepia') },
+    { label: 'Dark theme', keywords: 'appearance dark', run: () => setTheme('dark') }
   ];
+
+  function goToHeading(index, line) {
+    if (state.sourceMode) {
+      const position = sourceEditor.value.split('\n').slice(0, line - 1).join('\n').length + (line > 1 ? 1 : 0);
+      sourceEditor.focus(); sourceEditor.setSelectionRange(position, position); centerCaret(); return;
+    }
+    commitActiveBlock();
+    const heading = $$('h1,h2,h3,h4,h5,h6', editor)[index];
+    heading?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function contextualCommands(query) {
+    const markdown = currentMarkdown();
+    const recentCommands = getStoredDocs().map(doc => ({
+      label: `Recent: ${doc.name}`,
+      shortcut: relativeDate(doc.updated),
+      keywords: 'recent files documents open',
+      run: () => requestAction(() => loadMarkdown(doc.markdown, doc.name, { id: doc.id }))
+    }));
+    const headingCommands = [...markdown.matchAll(/^(#{1,6})\s+(.+)$/gm)].map((match, index) => ({
+      label: `Outline: ${match[2].replace(/[*_`]/g, '')}`,
+      shortcut: `H${match[1].length}`,
+      keywords: 'outline title heading section',
+      run: () => goToHeading(index, markdown.slice(0, match.index).split('\n').length)
+    }));
+    const removeCommands = query.includes('remove') ? getStoredDocs().map(doc => ({
+      label: `Remove recent: ${doc.name}`,
+      keywords: 'remove delete recent',
+      run: () => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(getStoredDocs().filter(item => item.id !== doc.id)));
+        toast('Document removed from recent files');
+      }
+    })) : [];
+    return [...recentCommands, ...headingCommands, ...removeCommands];
+  }
 
   function renderCommandList() {
     const query = $('#commandInput').value.trim().toLowerCase();
-    filteredCommands = commands.filter(command => `${command.label} ${command.keywords || ''}`.toLowerCase().includes(query));
+    filteredCommands = [...commands, ...contextualCommands(query)].filter(command => `${command.label} ${command.keywords || ''}`.toLowerCase().includes(query));
     selectedCommand = Math.max(0, Math.min(selectedCommand, filteredCommands.length - 1));
     $('#commandList').innerHTML = filteredCommands.length ? filteredCommands.map((command, index) =>
       `<button class="command-item${index === selectedCommand ? ' selected' : ''}" data-command-index="${index}" role="option" aria-selected="${index === selectedCommand}"><span>${escapeHtml(command.label)}</span>${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ''}</button>`
-    ).join('') : '<div class="command-empty">Nessun comando trovato</div>';
+    ).join('') : '<div class="command-empty">No commands found</div>';
     $('.command-item.selected')?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -786,42 +1181,19 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
   }
 
   // UI events
-  const sidebar = $('#sidebar');
-  let sidebarTimer;
-  let sidebarPinned = false;
-  const showSidebar = () => { clearTimeout(sidebarTimer); app.classList.add('sidebar-visible'); };
-  const closeSidebar = () => { sidebarPinned = false; clearTimeout(sidebarTimer); app.classList.remove('sidebar-visible'); };
-  const hideSidebar = (delay = 180) => {
-    if (sidebarPinned) return;
-    clearTimeout(sidebarTimer); sidebarTimer = setTimeout(() => app.classList.remove('sidebar-visible'), delay);
-  };
-  const toggleSidebar = () => {
-    const shouldShow = !app.classList.contains('sidebar-visible');
-    sidebarPinned = shouldShow;
-    app.classList.toggle('sidebar-visible', shouldShow);
-  };
-  function showSidebarTab(tab) {
-    sidebarPinned = true; showSidebar();
-    $(`.sidebar-tabs button[data-tab="${tab}"]`)?.click();
-  }
-  $('#sidebarReveal').addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') showSidebar(); });
-  $('#sidebarReveal').addEventListener('click', () => matchMedia('(hover: hover)').matches ? showSidebar() : toggleSidebar());
-  sidebar.addEventListener('pointerenter', showSidebar);
-  sidebar.addEventListener('pointerleave', () => hideSidebar());
-  document.addEventListener('pointermove', event => { if (event.pointerType === 'mouse' && event.clientX <= 12) showSidebar(); });
-  $('#scrim').addEventListener('click', closeSidebar);
   document.addEventListener('pointerdown', event => {
     if (activeSourceBlock && !editor.contains(event.target) && !$('#commandPalette').contains(event.target)) commitActiveBlock();
   }, true);
   editor.addEventListener('focusout', () => setTimeout(() => {
     if (activeSourceBlock && $('#commandPalette').hidden && !editor.contains(document.activeElement)) commitActiveBlock();
   }));
-  $('#openButton').addEventListener('click', () => requestAction(openFile));
-  $('#newButton').addEventListener('click', () => requestAction(newDocument));
-  $('#saveButton').addEventListener('click', saveFile);
-  $('#exportButton').addEventListener('click', exportHtml);
-  $('#findSidebar').addEventListener('click', () => { showFind(); closeSidebar(); });
-  $('#sourceButton').addEventListener('click', toggleSource);
+  $('#commandButton').addEventListener('click', showCommandPalette);
+  document.addEventListener('keydown', handleVimKeydown, true);
+  document.addEventListener('pointerup', event => {
+    if (!state.vimEnabled || state.vimMode !== 'normal') return;
+    const field = event.target === sourceEditor ? sourceEditor : (event.target === activeSourceBlock ? activeSourceBlock : null);
+    if (field) requestAnimationFrame(() => showVimCursor(field, field.selectionStart));
+  });
   $('#commandInput').addEventListener('input', () => { selectedCommand = 0; renderCommandList(); });
   $('#commandInput').addEventListener('keydown', event => {
     event.stopPropagation();
@@ -838,7 +1210,7 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     const file = fileInput.files[0]; if (file) loadMarkdown(await file.text(), file.name); fileInput.value = '';
   });
   fileName.addEventListener('input', changed);
-  fileName.addEventListener('blur', () => { if (!fileName.value.trim()) fileName.value = 'Senza titolo'; persistLocal(false); });
+  fileName.addEventListener('blur', () => { if (!fileName.value.trim()) fileName.value = 'Untitled'; persistLocal(false); });
   editor.addEventListener('input', event => {
     if (!event.target.matches?.('.md-source-block') && event.inputType?.startsWith('insert')) transformInlineMarkdown();
     changed();
@@ -868,37 +1240,9 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
   });
 
-  $$('.sidebar-tabs button').forEach(button => button.addEventListener('click', () => {
-    $$('.sidebar-tabs button').forEach(x => x.classList.toggle('active', x === button));
-    $$('.sidebar-panel').forEach(x => x.classList.remove('active'));
-    $(`#${button.dataset.tab}Panel`).classList.add('active');
-    if (button.dataset.tab === 'outline') updateOutline();
-  }));
-
-  $('#recentFiles').addEventListener('keydown', event => {
-    if (event.key === 'Enter' && event.target.matches('.recent-item')) { event.preventDefault(); event.target.click(); }
-  });
-  $('#recentFiles').addEventListener('click', event => {
-    const item = event.target.closest('.recent-item'); if (!item) return;
-    if (event.target.closest('.recent-remove')) {
-      event.stopPropagation(); localStorage.setItem(STORAGE_KEY, JSON.stringify(getStoredDocs().filter(d => d.id !== item.dataset.id))); renderRecents(); return;
-    }
-    const doc = getStoredDocs().find(d => d.id === item.dataset.id);
-    if (doc) requestAction(() => { loadMarkdown(doc.markdown, doc.name, { id: doc.id }); if (innerWidth <= 720) closeSidebar(); });
-  });
-
-  $('#outline').addEventListener('click', event => {
-    const link = event.target.closest('a'); if (!link) return; event.preventDefault();
-    if (state.sourceMode) {
-      const line = Number(link.dataset.sourceLine); const position = sourceEditor.value.split('\n').slice(0, line - 1).join('\n').length + (line > 1 ? 1 : 0);
-      sourceEditor.focus(); sourceEditor.setSelectionRange(position, position); centerCaret();
-    } else $(link.getAttribute('href'), editor)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  });
-
-  $('#themeSelect').addEventListener('change', event => setTheme(event.target.value));
   function setTheme(theme) {
     app.classList.remove('theme-sepia', 'theme-dark'); if (theme !== 'light') app.classList.add(`theme-${theme}`);
-    $('#themeSelect').value = theme; saveSettings({ theme });
+    saveSettings({ theme });
   }
   function saveSettings(change) {
     let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
@@ -921,10 +1265,9 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     if (event.key === '/' && !mod && !event.altKey && !activeSourceBlock && !state.sourceMode && (event.target === editor || editor.contains(event.target))) {
       event.preventDefault(); withMarkdownField(() => showCommandPalette()); return;
     }
-    if (event.key === 'F1' || (mod && event.shiftKey && key === 'p')) { event.preventDefault(); showCommandPalette(); return; }
+    if (event.key === 'F1' || (mod && key === 'k') || (mod && event.shiftKey && key === 'p')) { event.preventDefault(); showCommandPalette(); return; }
     if (!$('#commandPalette').hidden) return;
     if (mod && event.shiftKey && key === 'e') { event.preventDefault(); exportHtml(); return; }
-    if (mod && event.shiftKey && key === 'l') { event.preventDefault(); toggleSidebar(); return; }
     if (mod && event.shiftKey && event.code === 'Digit7') { event.preventDefault(); prefixMarkdownLines('', true); return; }
     if (mod && event.shiftKey && event.code === 'Digit8') { event.preventDefault(); prefixMarkdownLines('- '); return; }
     if (mod && ['1', '2', '3'].includes(event.key)) { event.preventDefault(); headingCommand(Number(event.key)); return; }
@@ -934,10 +1277,9 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
     if (mod && key === 'f') { event.preventDefault(); showFind(); return; }
     if (mod && key === 'b') { event.preventDefault(); wrapMarkdownSelection('**'); return; }
     if (mod && key === 'i') { event.preventDefault(); wrapMarkdownSelection('*'); return; }
-    if (mod && key === 'k') { event.preventDefault(); wrapMarkdownSelection('[', '](https://)', 'testo'); return; }
     if (mod && event.key === '`') { event.preventDefault(); wrapMarkdownSelection('`'); return; }
     if (mod && event.key === '/') { event.preventDefault(); toggleSource(); return; }
-    if (event.key === 'Escape') { $('#findbar').hidden = true; closeSidebar(); }
+    if (event.key === 'Escape') $('#findbar').hidden = true;
   });
 
   window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
@@ -952,17 +1294,18 @@ Apri, salva ed esporta dalla sidebar, visibile avvicinandoti al bordo sinistro. 
   // Initial state
   let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
   setTheme(settings.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  setVimEnabled(Boolean(settings.vimEnabled), false);
   let docs = getStoredDocs();
   if (settings.welcomeVersion !== WELCOME_VERSION) {
-    const welcome = docs.find(doc => doc.name === 'Benvenuto');
-    if (welcome) { welcome.markdown = starter; welcome.updated = Date.now(); }
-    else if (docs.length) docs = [...docs.slice(0, 9), { id: 'markd-welcome', name: 'Benvenuto', markdown: starter, updated: Date.now() }];
+    const welcome = docs.find(doc => doc.name === 'Welcome' || doc.name === 'Benvenuto');
+    if (welcome) { welcome.name = 'Welcome'; welcome.markdown = starter; welcome.updated = Date.now(); }
+    else if (docs.length) docs = [...docs.slice(0, 9), { id: 'markd-welcome', name: 'Welcome', markdown: starter, updated: Date.now() }];
     if (docs.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(docs.slice(0, 10)));
     saveSettings({ welcomeVersion: WELCOME_VERSION });
   }
   docs = getStoredDocs();
   if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
-  else loadMarkdown(starter, 'Benvenuto');
+  else loadMarkdown(starter, 'Welcome');
 
   if ('launchQueue' in window) {
     window.launchQueue.setConsumer(async launchParams => {

@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
-  <meta name="description" content="Un editor Markdown minimale, veloce e locale.">
+  <meta name="description" content="A minimal, fast, local Markdown editor.">
   <title>markd — Markdown editor</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
@@ -13,89 +13,49 @@
   <div id="app" class="app">
     <header class="titlebar">
       <div class="document-title">
-        <input id="fileName" value="Senza titolo" aria-label="Nome documento" spellcheck="false">
-        <span id="dirtyDot" class="dirty-dot" aria-label="Modifiche non salvate"></span>
+        <input id="fileName" value="Untitled" aria-label="Document name" spellcheck="false">
+        <span id="dirtyDot" class="dirty-dot" aria-label="Unsaved changes"></span>
       </div>
+      <button class="command-button" id="commandButton" aria-label="Open commands" aria-keyshortcuts="Control+K Meta+K" title="Commands (⌘/Ctrl + K)">
+        <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+      </button>
     </header>
-
-    <button class="sidebar-reveal" id="sidebarReveal" aria-label="Mostra barra laterale" aria-keyshortcuts="Control+Shift+L Meta+Shift+L" title="Sidebar (⌘/Ctrl + Shift + L)"></button>
-    <aside class="sidebar" id="sidebar" aria-label="Barra laterale">
-      <div class="sidebar-actions" aria-label="Azioni documento">
-        <div class="section-label">DOCUMENTO <kbd>⇧⌘L</kbd></div>
-        <div class="primary-actions">
-          <button class="sidebar-icon-action" id="newButton" aria-label="Nuovo documento" title="Nuovo documento (⌘N)">
-            <svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M12 12v6M9 15h6"/></svg>
-          </button>
-          <button class="sidebar-icon-action" id="openButton" aria-label="Apri file" title="Apri file (⌘O)">
-            <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10l-2 10H5z"/></svg>
-          </button>
-          <button class="sidebar-icon-action" id="saveButton" aria-label="Salva documento" title="Salva (⌘S)">
-            <svg viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg>
-          </button>
-        </div>
-        <button class="sidebar-action export-action" id="exportButton">
-          <svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M5 13v7h14v-7"/></svg> Esporta HTML
-        </button>
-      </div>
-      <div class="sidebar-tabs" role="tablist">
-        <button class="active" data-tab="files" role="tab">RECENTI</button>
-        <button data-tab="outline" role="tab">INDICE</button>
-      </div>
-      <section class="sidebar-panel active" id="filesPanel">
-        <div id="recentFiles" class="recent-files"></div>
-      </section>
-      <section class="sidebar-panel" id="outlinePanel">
-        <nav id="outline" class="outline" aria-label="Indice del documento"></nav>
-      </section>
-      <div class="sidebar-tools">
-        <button id="findSidebar">Trova <kbd>⌘F</kbd></button>
-        <button id="sourceButton">Sorgente Markdown <kbd>⌘/</kbd></button>
-        <label>Tema
-          <select id="themeSelect"><option value="light">Chiaro</option><option value="sepia">Seppia</option><option value="dark">Scuro</option></select>
-        </label>
-      </div>
-      <footer class="sidebar-footer">
-        <span id="storageStatus"><i class="status-dot"></i> Salvato in locale</span>
-        <span id="saveState">Pronto</span>
-      </footer>
-    </aside>
 
     <main class="workspace">
       <div class="findbar" id="findbar" hidden>
         <svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
-        <input id="findInput" type="search" placeholder="Trova nel documento" aria-label="Trova">
-        <button id="findPrev" aria-label="Precedente">↑</button><button id="findNext" aria-label="Successivo">↓</button>
-        <button id="findClose" aria-label="Chiudi">×</button>
+        <input id="findInput" type="search" placeholder="Find in document" aria-label="Find">
+        <button id="findPrev" aria-label="Previous">↑</button><button id="findNext" aria-label="Next">↓</button>
+        <button id="findClose" aria-label="Close">×</button>
       </div>
 
       <div class="markd-wrap" id="markdWrap">
         <article id="editor" class="editor" contenteditable="true" spellcheck="true" aria-label="Editor Markdown"></article>
-        <textarea id="sourceEditor" class="source-editor" spellcheck="false" aria-label="Codice sorgente Markdown" hidden></textarea>
+        <textarea id="sourceEditor" class="source-editor" spellcheck="false" aria-label="Markdown source" hidden></textarea>
       </div>
 
-      <footer class="statusbar"><span id="wordCount">0 parole</span></footer>
+      <footer class="statusbar"><span id="vimStatus" class="vim-status" hidden>-- NORMAL --</span><span id="saveState">Ready</span><span id="wordCount">0 words</span></footer>
     </main>
 
-    <div class="scrim" id="scrim"></div>
 
     <div class="dialog-backdrop" id="confirmDialog" hidden>
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
-        <h2 id="dialogTitle">Modifiche non salvate</h2>
-        <p>Vuoi salvare questo documento prima di continuare?</p>
-        <div><button data-dialog="cancel">Annulla</button><button data-dialog="discard">Non salvare</button><button class="primary" data-dialog="save">Salva</button></div>
+        <h2 id="dialogTitle">Unsaved changes</h2>
+        <p>Do you want to save this document before continuing?</p>
+        <div><button data-dialog="cancel">Cancel</button><button data-dialog="discard">Don’t save</button><button class="primary" data-dialog="save">Save</button></div>
       </div>
     </div>
 
     <div class="command-backdrop" id="commandPalette" hidden>
-      <div class="command-palette" role="dialog" aria-modal="true" aria-label="Comandi">
-        <input id="commandInput" type="text" placeholder="Digita un comando…" autocomplete="off" spellcheck="false" aria-label="Cerca comando">
+      <div class="command-palette" role="dialog" aria-modal="true" aria-label="Commands">
+        <input id="commandInput" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false" aria-label="Search commands">
         <div id="commandList" class="command-list" role="listbox"></div>
       </div>
     </div>
     <div id="toast" class="toast" role="status"></div>
     <input id="fileInput" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
   </div>
-  <noscript>Questa applicazione richiede JavaScript.</noscript>
+  <noscript>This application requires JavaScript.</noscript>
   <script src="app.js"></script>
 </body>
 </html>
