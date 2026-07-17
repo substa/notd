@@ -100,6 +100,7 @@
         stack.length = depth;
         stack[depth] = block;
         current = block;
+        if (/^\s*(```|~~~)/.test(content)) inFence = true;
         return;
       }
 

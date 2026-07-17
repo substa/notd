@@ -21,6 +21,26 @@ test('parses and serializes nested Logseq blocks', () => {
   assert.equal(Graph.serializeDocument(document), markdown);
 });
 
+test('keeps fenced code inside a single graph block', () => {
+  const markdown = '- ```bash\n  echo "hello"\n  - this is code, not a child block\n  ```\n- next block\n';
+  const document = Graph.parseDocument(markdown);
+
+  assert.equal(document.blocks.length, 2);
+  assert.equal(document.blocks[0].children.length, 0);
+  assert.equal(document.blocks[0].content, '```bash\necho "hello"\n- this is code, not a child block\n```');
+  assert.equal(Graph.serializeDocument(document), markdown);
+});
+
+test('keeps fenced code nested after text inside a graph block', () => {
+  const markdown = '- real IP on access.log\n  ```bash\n  LogFormat "%{X-Forwarded-For}i" combined\n  - shell content\n  ```\n- next block\n';
+  const document = Graph.parseDocument(markdown);
+
+  assert.equal(document.blocks.length, 2);
+  assert.equal(document.blocks[0].children.length, 0);
+  assert.match(document.blocks[0].content, /real IP[\s\S]*```bash[\s\S]*LogFormat/);
+  assert.equal(Graph.serializeDocument(document), markdown);
+});
+
 test('indexes page and block references', () => {
   const pages = [
     { title: 'Source', path: 'pages/source.md', content: '- See [[Alias]] and ((12345678-abcd))\n' },

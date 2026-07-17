@@ -119,6 +119,78 @@ Open, save, export, and reach recent documents or headings from the command pale
     return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(decoded) || !/^[a-z][a-z0-9+.-]*:/i.test(decoded) ? escapeHtml(decoded) : '#';
   }
 
+  const syntaxKeywords = {
+    javascript: new Set('as async await break case catch class const continue debugger default delete do else export extends finally for from function get if import in instanceof let new of return set static super switch throw try typeof var void while with yield true false null undefined'.split(' ')),
+    python: new Set('and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield'.split(' ')),
+    shell: new Set('case do done elif else esac fi for function if in select then time until while'.split(' ')),
+    json: new Set('true false null'.split(' ')),
+    css: new Set('@charset @font-face @import @keyframes @media @page @supports important'.split(' ')),
+    sql: new Set('all alter and as asc between by case create delete desc distinct drop else end exists from group having in inner insert into is join left like limit not null on or order outer right select set table then union update values when where'.split(' '))
+  };
+
+  const syntaxBuiltins = {
+    javascript: new Set('Array Boolean console Date document Error JSON Map Math Number Object Promise RegExp Set String window'.split(' ')),
+    python: new Set('bool dict enumerate filter float int len list map max min open print range set str sum tuple zip'.split(' ')),
+    shell: new Set('alias cd echo env exec exit export printf pwd read set source test trap unset'.split(' ')),
+    css: new Set('background border color display flex font gap grid height margin padding position transform transition width'.split(' ')),
+    sql: new Set('avg count max min sum'.split(' '))
+  };
+
+  function syntaxLanguage(language = '') {
+    const name = language.toLowerCase().replace(/[^a-z0-9+#-]/g, '');
+    if (['js', 'jsx', 'ts', 'tsx', 'node'].includes(name)) return 'javascript';
+    if (['py', 'python3'].includes(name)) return 'python';
+    if (['sh', 'bash', 'zsh', 'fish', 'console', 'terminal'].includes(name)) return 'shell';
+    if (['html', 'xml', 'svg', 'markup'].includes(name)) return 'html';
+    if (['yml', 'yaml'].includes(name)) return 'shell';
+    return name || 'plain';
+  }
+
+  function highlightCode(code, language = '') {
+    const lang = syntaxLanguage(language);
+    const pieces = [];
+    let last = 0;
+    const emitMatches = pattern => {
+      for (const match of code.matchAll(pattern)) {
+        pieces.push(escapeHtml(code.slice(last, match.index)));
+        let type = '';
+        const token = match[0];
+        if (/^(?:\/\*|\/\/|#|--|<!--)/.test(token)) type = 'comment';
+        else if (lang === 'html' && /^<\/?[A-Za-z]/.test(token)) type = 'tag';
+        else if (/^["'`]/.test(token)) type = 'string';
+        else if (/^(?:\d|\.\d)/.test(token)) type = 'number';
+        else if (syntaxKeywords[lang]?.has(token) || syntaxKeywords[lang]?.has(token.toLowerCase())) type = 'keyword';
+        else if (syntaxBuiltins[lang]?.has(token) || syntaxBuiltins[lang]?.has(token.toLowerCase())) type = 'builtin';
+        else if (/^[+*/%=!<>&|?:~^$@-]+$/.test(token)) type = 'operator';
+        pieces.push(type ? `<span class="syntax-${type}">${escapeHtml(token)}</span>` : escapeHtml(token));
+        last = match.index + token.length;
+      }
+      pieces.push(escapeHtml(code.slice(last)));
+      return pieces.join('');
+    };
+
+    if (lang === 'html') return emitMatches(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g);
+    const comments = ['python', 'shell'].includes(lang) ? '#.*$' : lang === 'sql' ? '--.*$|\\/\\*[\\s\\S]*?\\*\\/' : lang === 'json' ? '(?!)' : '\\/\\*[\\s\\S]*?\\*\\/|\\/\\/.*$';
+    const pattern = new RegExp(`${comments}|"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|\`(?:\\\\.|[^\`\\\\])*\`|\\b(?:0x[\\da-f]+|\\d+(?:\\.\\d+)?)\\b|[A-Za-z_$@][\\w$@-]*|[+*/%=!<>&|?:~^$@-]+`, 'gmi');
+    return emitMatches(pattern);
+  }
+
+  function highlightedCodeBlock(code, language = '') {
+    const label = language.trim();
+    const safeLanguage = syntaxLanguage(label);
+    return `<pre${label ? ` data-lang="${escapeHtml(label)}"` : ''} class="graph-code-block"><code class="language-${safeLanguage}">${highlightCode(code, label)}</code></pre>`;
+  }
+
+  function fenceOpening(line = '') {
+    const opening = line.match(/^\s*(`{3,}|~{3,})[^\S\n]*([^\s`]*)[^\n]*$/);
+    if (!opening) return null;
+    return { marker: opening[1], language: opening[2] || '' };
+  }
+
+  function fenceClosing(line, marker) {
+    return new RegExp(`^\\s*${marker[0]}{${marker.length},}\\s*$`).test(line);
+  }
+
   function inlineMarkdown(text) {
     let value = escapeHtml(text);
     const code = [];
@@ -171,7 +243,8 @@ Open, save, export, and reach recent documents or headings from the command pale
         i++;
         while (i < lines.length && !new RegExp(`^\\s*${marker}`).test(lines[i])) content.push(lines[i++]);
         if (i < lines.length) i++;
-        html.push(`<pre${lang ? ` data-lang="${escapeHtml(lang)}"` : ''}><code>${escapeHtml(content.join('\n'))}</code></pre>`);
+        const safeLanguage = syntaxLanguage(lang);
+        html.push(`<pre${lang ? ` data-lang="${escapeHtml(lang)}"` : ''}><code class="language-${safeLanguage}">${highlightCode(content.join('\n'), lang)}</code></pre>`);
         continue;
       }
 
@@ -334,14 +407,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     }).join('\n').trim();
   }
 
-  function graphDisplayContent(block) {
-    const propertyLines = [];
-    const visible = String(block.content || '').split('\n').filter(line => {
-      const property = line.match(/^\s*([\w-]+)::\s*(.*?)\s*$/);
-      if (property) { if (!hiddenGraphProperties.has(property[1].toLowerCase())) propertyLines.push(property); return false; }
-      return true;
-    }).join('\n').trimEnd();
-    let html = inlineMarkdown(visible).replace(/\n/g, '<br>');
+  function graphTextHtml(text, block) {
+    const value = text.replace(/^\n+|\n+$/g, '');
+    if (!value) return '';
+    const quote = value.split('\n').every(line => /^\s*>/.test(line));
+    let html = quote
+      ? `<blockquote>${inlineMarkdown(value.split('\n').map(line => line.replace(/^\s*>\s?/, '')).join('\n')).replace(/\n/g, '<br>')}</blockquote>`
+      : inlineMarkdown(value).replace(/\n/g, '<br>');
     html = html.replace(/^(TODO|DOING|DONE)\b/, status => `<button class="graph-task graph-task-${status.toLowerCase()}" data-task-block="${escapeHtml(block.id)}">${status}</button>`);
     html = html.replace(/\[\[([^\]]+?)\]\]/g, (_, target) => {
       const [page, alias] = target.split('|');
@@ -352,7 +424,47 @@ Open, save, export, and reach recent documents or headings from the command pale
       const label = resolved ? resolved.content.split('\n')[0].replace(/^\s*(?:[\w-]+::.*)?$/, '').trim() || uuid : uuid;
       return `<button class="graph-block-ref" data-block-ref="${escapeHtml(uuid)}" title="${escapeHtml(uuid)}">${escapeHtml(label)}</button>`;
     });
-    html = html.replace(/(^|\s)#([\p{L}\p{N}_/-]+)/gu, '$1<button class="graph-tag" data-page="$2">#$2</button>');
+    return html.replace(/(^|\s)#([\p{L}\p{N}_/-]+)/gu, '$1<button class="graph-tag" data-page="$2">#$2</button>');
+  }
+
+  function graphMixedMarkdownHtml(value, block) {
+    const lines = value.replace(/\r\n?/g, '\n').split('\n');
+    const html = [];
+    let text = [];
+    const flushText = () => {
+      const rendered = graphTextHtml(text.join('\n'), block);
+      if (rendered) html.push(rendered);
+      text = [];
+    };
+    for (let index = 0; index < lines.length;) {
+      const opening = fenceOpening(lines[index]);
+      if (!opening) { text.push(lines[index]); index++; continue; }
+      flushText();
+      const code = [];
+      index++;
+      while (index < lines.length && !fenceClosing(lines[index], opening.marker)) code.push(lines[index++]);
+      if (index < lines.length) index++;
+      html.push(highlightedCodeBlock(code.join('\n'), opening.language));
+    }
+    flushText();
+    return html.join('');
+  }
+
+  function graphDisplayContent(block) {
+    const propertyLines = [];
+    let activeFence = null;
+    const visible = String(block.content || '').split('\n').filter(line => {
+      const opening = !activeFence && fenceOpening(line);
+      if (opening) { activeFence = opening.marker; return true; }
+      if (activeFence) {
+        if (fenceClosing(line, activeFence)) activeFence = null;
+        return true;
+      }
+      const property = line.match(/^\s*([\w-]+)::\s*(.*?)\s*$/);
+      if (property) { if (!hiddenGraphProperties.has(property[1].toLowerCase())) propertyLines.push(property); return false; }
+      return true;
+    }).join('\n').trimEnd();
+    let html = graphMixedMarkdownHtml(visible, block);
     if (propertyLines.length) html += `${html ? '<br>' : ''}${propertyLines.map(item => `<span class="graph-property">${escapeHtml(item[1])} · ${escapeHtml(item[2])}</span>`).join('')}`;
     return html;
   }
@@ -479,6 +591,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!content) return;
     const field = document.createElement('textarea');
     field.className = 'graph-block-editor'; field.spellcheck = true; field.value = block.content;
+    if (field.value.split('\n').some(line => fenceOpening(line))) field.classList.add('graph-code-editor');
+    else if (field.value && field.value.split('\n').every(line => /^\s*>/.test(line))) field.classList.add('graph-quote-editor');
     field.dataset.blockId = block.id;
     field.addEventListener('beforeinput', event => {
       if (matchMedia('(max-width:720px)').matches && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
@@ -808,6 +922,10 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function handleGraphBlockInput(event) {
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
+    const code = field.value.split('\n').some(line => fenceOpening(line));
+    const quote = !code && field.value && field.value.split('\n').every(line => /^\s*>/.test(line));
+    field.classList.toggle('graph-code-editor', code);
+    field.classList.toggle('graph-quote-editor', Boolean(quote));
     location.block.content = field.value; activeGraphBlock.block = location.block; resizeGraphEditor(field); graphChanged(); showGraphAutocomplete(field);
   }
 
@@ -2409,6 +2527,8 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function setTheme(theme) {
     app.classList.remove('theme-sepia', 'theme-dark'); if (theme !== 'light') app.classList.add(`theme-${theme}`);
+    const themeColors = { light: '#fdfcfb', sepia: '#f5efe3', dark: '#282725' };
+    $('meta[name="theme-color"]')?.setAttribute('content', themeColors[theme] || themeColors.light);
     saveSettings({ theme });
   }
   function saveSettings(change) {
