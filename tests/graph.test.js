@@ -33,6 +33,25 @@ test('indexes page and block references', () => {
   assert.equal(index.search('referenced').length, 1);
 });
 
+test('indexes namespaced page links and tags', () => {
+  const pages = [
+    { title: 'Source', path: 'pages/source.md', content: '- [[persone/nome]]\n- #persone/nome\n' },
+    { title: 'nome', name: 'persone___nome.md', path: 'pages/persone___nome.md', content: '- Profile\n' }
+  ];
+  const index = new Graph.GraphIndex(pages);
+  assert.equal(index.referencesToPage('persone/nome').length, 2);
+  assert.equal(index.referencesToPage('nome').length, 2);
+  assert.equal(index.resolvePage('persone___nome').title, 'nome');
+  assert.equal(index.resolvePage('persone%2Fnome').title, 'nome');
+  assert.equal(Graph.pageTitle('title:: nome', 'persone___nome.md'), 'persone/nome');
+});
+
+test('resolves graph assets relative to the page folder', () => {
+  assert.equal(Graph.resolveAssetPath('../assets/immagine.jpg', 'pages'), 'assets/immagine.jpg');
+  assert.equal(Graph.resolveAssetPath('../assets/My%20image.jpg', 'journals'), 'assets/My image.jpg');
+  assert.equal(Graph.resolveAssetPath('./images/image.jpg', 'pages/nested'), 'pages/nested/images/image.jpg');
+});
+
 test('uses Logseq-compatible journal date formats', () => {
   const date = new Date(2026, 6, 17);
   assert.equal(Graph.formatJournalDate(date, 'yyyy_MM_dd'), '2026_07_17');

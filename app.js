@@ -9,8 +9,8 @@
   const markdWrap = $('#markdWrap');
   const outliner = $('#outliner');
   const blockTree = $('#blockTree');
+  const pageHierarchy = $('#pageHierarchy');
   const references = $('#references');
-  const graphName = $('#graphName');
   const graphAutocomplete = $('#graphAutocomplete');
   const mobileBlockToolbar = $('#mobileBlockToolbar');
   const documentationView = $('#documentationView');
@@ -33,6 +33,7 @@
   let graphHistoryIndex = -1;
   let graphStore = null;
   let graphIndex = null;
+  let paletteGraphStatsCache = null;
   let closeRemoteEvents = null;
   let remoteRefreshTimer = null;
   let remoteRefreshPending = false;
@@ -319,11 +320,25 @@ Open, save, export, and reach recent documents or headings from the command pale
     saveSettings({ graphCollapsed: { ...(settings.graphCollapsed || {}), [state.graphPage.path]: ids } });
   }
 
+  const hiddenGraphProperties = new Set([
+    'alias', 'aliases', 'background-color', 'collapsed', 'created-at', 'exclude-from-graph-view',
+    'heading', 'icon', 'id', 'public', 'tags', 'template', 'template-including-parent', 'title', 'type', 'updated-at'
+  ]);
+
+  function visibleGraphPreamble(lines = []) {
+    let frontmatter = false;
+    return lines.filter((line, index) => {
+      if (/^\s*---\s*$/.test(line) && (frontmatter || index === 0)) { frontmatter = !frontmatter; return false; }
+      if (frontmatter) return false;
+      return !/^\s*[\w-]+::\s*/.test(line);
+    }).join('\n').trim();
+  }
+
   function graphDisplayContent(block) {
     const propertyLines = [];
     const visible = String(block.content || '').split('\n').filter(line => {
       const property = line.match(/^\s*([\w-]+)::\s*(.*?)\s*$/);
-      if (property) { if (property[1].toLowerCase() !== 'id') propertyLines.push(property); return false; }
+      if (property) { if (!hiddenGraphProperties.has(property[1].toLowerCase())) propertyLines.push(property); return false; }
       return true;
     }).join('\n').trimEnd();
     let html = inlineMarkdown(visible).replace(/\n/g, '<br>');
@@ -348,9 +363,12 @@ Open, save, export, and reach recent documents or headings from the command pale
     content.dataset.blockId = block.id; content.dataset.pagePath = page?.path || '';
     content.innerHTML = graphDisplayContent(block);
     if (graphStore && page) {
+      const fromFolder = page.path?.includes('/') ? page.path.split('/').slice(0, -1).join('/') : (page.folder || '');
       $$('img', content).forEach(image => {
         const source = image.getAttribute('src');
-        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, page.folder).then(url => { if (image.isConnected) image.src = url; }).catch(() => {});
+        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, fromFolder).then(url => { if (image.isConnected) image.src = url; }).catch(() => {
+          image.classList.add('asset-error'); image.title = `Image not found: ${source}`;
+        });
       });
     }
     return content;
@@ -414,7 +432,7 @@ Open, save, export, and reach recent documents or headings from the command pale
         section.className = `journal-entry${page.path === state.graphPage.path ? ' active' : ''}${page.journalDate === today ? ' today' : ''}`; section.dataset.journalPath = page.path;
         const heading = document.createElement('button'); heading.type = 'button'; heading.className = 'journal-heading';
         heading.dataset.journalPage = page.path; heading.textContent = page.title; section.append(heading);
-        const preamble = journalDocument.preamble.join('\n').trim();
+        const preamble = visibleGraphPreamble(journalDocument.preamble);
         if (preamble) { const properties = document.createElement('div'); properties.className = 'journal-preamble'; properties.textContent = preamble; section.append(properties); }
         const tree = document.createElement('div'); tree.className = 'journal-blocks'; tree.append(renderBlocks(journalDocument.blocks, page)); section.append(tree); fragment.append(section);
       }
@@ -428,19 +446,19 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     blockTree.replaceChildren(fragment);
     const preamble = $('#pagePreamble');
-    const preambleText = state.graphDocument.preamble.join('\n').trim();
+    const preambleText = visibleGraphPreamble(state.graphDocument.preamble);
     preamble.hidden = state.journalMode || !preambleText; preamble.textContent = preambleText;
     const breadcrumb = $('#zoomBreadcrumb');
     breadcrumb.hidden = !state.graphZoomId;
     breadcrumb.innerHTML = state.graphZoomId ? `<button type="button" data-clear-zoom>${escapeHtml(state.graphPage?.title || 'Page')}</button> / Block` : '';
-    renderReferences();
+    renderPageHierarchy(); renderReferences();
     if (state.journalMode && !state.graphZoomId && state.journalLimit < orderedJournalPages().length) requestAnimationFrame(() => {
       if (state.journalMode && markdWrap.scrollHeight <= markdWrap.clientHeight + 80) { state.journalLimit += 8; renderGraphPage(); }
     });
   }
 
   function resizeGraphEditor(field) {
-    field.style.height = '0'; field.style.height = `${Math.max(28, field.scrollHeight)}px`;
+    field.style.height = '0'; field.style.height = `${Math.max(32, field.scrollHeight)}px`;
   }
 
   function commitGraphBlock() {
@@ -614,7 +632,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null; state.vimMode = 'normal';
     editor.hidden = true; sourceEditor.hidden = true; outliner.hidden = false;
     app.classList.add('graph-mode'); app.classList.toggle('journal-mode', state.journalMode); app.classList.toggle('dirty', Boolean(draft));
-    graphName.hidden = false; graphName.textContent = graphStore.name; updateVimUi();
+    updateVimUi();
     fileName.value = page.title; fileName.readOnly = Boolean(page.journal); document.title = `${page.title} — ${graphStore.name} — markd`;
     rememberGraphPage(page);
     renderGraphPage(); updateStats();
@@ -730,10 +748,42 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (state.dirty && !(await flushGraphSave(true))) return;
     closeRemoteEvents?.(); closeRemoteEvents = null; graphStore?.disposeAssets();
     state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1;
-    outliner.hidden = true; graphName.hidden = true; app.classList.remove('graph-mode', 'journal-mode');
+    outliner.hidden = true; app.classList.remove('graph-mode', 'journal-mode');
     const docs = getStoredDocs();
     if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
     else loadMarkdown('', 'Untitled');
+  }
+
+  function namespacePageTitle(page = state.graphPage) {
+    if (!page) return '';
+    if (String(page.title).includes('/')) return page.title;
+    const filename = page.name || page.path?.split('/').at(-1) || '';
+    const inferred = MarkdGraph.pageTitle('', filename);
+    return inferred.includes('/') ? inferred : page.title;
+  }
+
+  function hierarchyBreadcrumb(title, current = false) {
+    const segments = title.split('/').map(segment => segment.trim()).filter(Boolean);
+    return segments.map((segment, index) => {
+      const target = segments.slice(0, index + 1).join('/');
+      if (current && index === segments.length - 1) return `<span>${escapeHtml(segment)}</span>`;
+      return `<button type="button" class="graph-page-ref" data-page="${escapeHtml(target)}">${escapeHtml(segment)}</button>`;
+    }).join('<i aria-hidden="true">/</i>');
+  }
+
+  function renderPageHierarchy() {
+    if (!state.graphMode || !graphIndex || !state.graphPage || state.journalMode) { pageHierarchy.hidden = true; pageHierarchy.innerHTML = ''; return; }
+    const currentTitle = namespacePageTitle(); const currentParts = currentTitle.split('/');
+    const children = graphIndex.allPages().map(page => ({ page, title: namespacePageTitle(page) }))
+      .filter(item => {
+        const parts = item.title.split('/');
+        return parts.length === currentParts.length + 1 && MarkdGraph.normalizePage(parts.slice(0, -1).join('/')) === MarkdGraph.normalizePage(currentTitle);
+      }).sort((a, b) => a.title.localeCompare(b.title));
+    const rows = [];
+    if (currentParts.length > 1) rows.push(`<div class="hierarchy-path current">${hierarchyBreadcrumb(currentTitle, true)}</div>`);
+    children.forEach(child => rows.push(`<div class="hierarchy-path">${hierarchyBreadcrumb(child.title)}</div>`));
+    pageHierarchy.hidden = !rows.length;
+    pageHierarchy.innerHTML = rows.length ? `<h3>Hierarchy</h3>${rows.join('')}` : '';
   }
 
   function renderReferences(includeUnlinked = false) {
@@ -744,12 +794,13 @@ Open, save, export, and reach recent documents or headings from the command pale
       return [...groups].map(([title, group]) => `<div class="reference-group"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${escapeHtml(item.content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220))}</button>`).join('')}</div>`).join('');
     };
     const aggregatePages = new Set(['home', 'journals', "today's journal", "today's journals", 'todays journal', 'todays journals', 'today journal']);
-    const linked = graphIndex.referencesToPage(state.graphPage.title)
+    const pageTitle = namespacePageTitle();
+    const linked = graphIndex.referencesToPage(pageTitle)
       .filter(item => !aggregatePages.has(MarkdGraph.normalizePage(item.page.title)));
     const zoomedBlock = state.graphZoomId ? graphBlockLocation(state.graphZoomId)?.block : null;
     const blockUuid = zoomedBlock && MarkdGraph.propertiesFrom(zoomedBlock.content).id;
     const blockLinked = blockUuid ? graphIndex.referencesToBlock(blockUuid) : [];
-    const unlinked = includeUnlinked ? graphIndex.unlinkedReferences(state.graphPage.title) : [];
+    const unlinked = includeUnlinked ? graphIndex.unlinkedReferences(pageTitle) : [];
     references.innerHTML = `<details${linked.length ? ' open' : ''}><summary>Linked references · ${linked.length}</summary>${renderGroups(linked)}</details>${blockUuid ? `<details${blockLinked.length ? ' open' : ''}><summary>Block references · ${blockLinked.length}</summary>${renderGroups(blockLinked)}</details>` : ''}${includeUnlinked ? `<details${unlinked.length ? ' open' : ''}><summary>Unlinked references · ${unlinked.length}</summary>${renderGroups(unlinked)}</details>` : '<button class="unlinked-button" data-show-unlinked>Find unlinked references</button>'}`;
   }
 
@@ -1505,7 +1556,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   function loadMarkdown(markdown, name = 'Untitled', options = {}) {
     if (state.graphMode && graphStore?.isRemote) { closeRemoteEvents?.(); closeRemoteEvents = null; }
     state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false; state.journalMode = false;
-    outliner.hidden = true; graphName.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
+    outliner.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
     app.classList.remove('graph-mode', 'journal-mode', 'source-mode'); updateVimUi();
     state.markdown = markdown;
     activeSourceBlock = null; activeGraphBlock = null; mobileBlockToolbar.hidden = true;
@@ -2027,6 +2078,39 @@ Open, save, export, and reach recent documents or headings from the command pale
     return `<button class="command-item${index === selectedCommand ? ' selected' : ''}" data-command-index="${index}" role="option" aria-selected="${index === selectedCommand}"><span>${escapeHtml(command.label)}</span>${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ''}</button>`;
   }
 
+  function formatGraphSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    if (bytes < 1024 ** 4) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
+  }
+
+  function renderPaletteGraphStats() {
+    const footer = $('#commandPaletteStats'); const store = graphStore;
+    footer.hidden = !store;
+    if (!store) return;
+    const applyStats = stats => {
+      if (graphStore !== store || !stats) return;
+      $('#paletteGraphFiles').textContent = `${stats.files} ${stats.files === 1 ? 'file' : 'files'}${stats.partial ? ' indexed' : ''}`;
+      $('#paletteGraphModified').textContent = stats.lastModified ? `Modified ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(stats.lastModified)}` : 'No modifications';
+      $('#paletteGraphSize').textContent = `${stats.partial ? '≥ ' : ''}${formatGraphSize(stats.size)}`;
+    };
+    $('#paletteGraphName').textContent = store.name || 'Graph';
+    if (paletteGraphStatsCache?.store === store && paletteGraphStatsCache.value && Date.now() - paletteGraphStatsCache.time < 30000) {
+      applyStats(paletteGraphStatsCache.value); return;
+    }
+    $('#paletteGraphFiles').textContent = 'Calculating folder…'; $('#paletteGraphModified').textContent = ''; $('#paletteGraphSize').textContent = '';
+    if (paletteGraphStatsCache?.store === store && paletteGraphStatsCache.promise) return;
+    const cache = { store, promise: store.stats(), value: null, time: 0 }; paletteGraphStatsCache = cache;
+    cache.promise.then(stats => {
+      cache.value = stats; cache.time = Date.now(); cache.promise = null; applyStats(stats);
+    }).catch(() => {
+      if (graphStore === store) $('#paletteGraphFiles').textContent = 'Folder statistics unavailable';
+      cache.promise = null;
+    });
+  }
+
   function renderCommandList() {
     const rawQuery = $('#commandInput').value.trim(); const query = rawQuery.toLowerCase(); const searching = Boolean(query);
     const commandQuery = query.replace(/^\/+/, ''); const slashQuery = query.startsWith('/');
@@ -2065,6 +2149,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     });
     $('.command-palette').classList.toggle('has-expanded-section', expandedCommandSections.size > 0);
     $$('[data-command-section]').forEach(section => section.classList.toggle('expanded', expandedCommandSections.has(section.dataset.commandSection)));
+    renderPaletteGraphStats();
     $('.command-item.selected')?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -2317,7 +2402,6 @@ Open, save, export, and reach recent documents or headings from the command pale
     const block = { id: MarkdGraph.newId(), uuid: null, content: '', marker: '-', children: [], collapsed: false };
     state.graphDocument.blocks.push(block); graphMutationFocus(block, 0);
   });
-  graphName.addEventListener('click', () => showCommandPalette());
   graphAutocomplete.addEventListener('pointerdown', event => event.preventDefault());
   graphAutocomplete.addEventListener('click', event => {
     const item = event.target.closest('[data-autocomplete-index]'); if (item) chooseGraphAutocomplete(Number(item.dataset.autocompleteIndex));

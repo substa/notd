@@ -8,11 +8,11 @@
   <title>markd — Markdown editor</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="theme-config.css">
 </head>
 <body>
   <div id="app" class="app">
     <header class="titlebar">
-      <button id="graphName" class="graph-name" type="button" title="Graph pages" hidden></button>
       <div class="document-title">
         <input id="fileName" value="Untitled" aria-label="Document name" spellcheck="false">
         <span id="dirtyDot" class="dirty-dot" aria-label="Unsaved changes"></span>
@@ -50,6 +50,7 @@
           <div id="pagePreamble" class="page-preamble" hidden></div>
           <div id="blockTree" class="block-tree"></div>
           <button id="addBlock" class="add-block" type="button">Add block</button>
+          <nav id="pageHierarchy" class="page-hierarchy" aria-label="Page hierarchy" hidden></nav>
           <section id="references" class="references"></section>
         </article>
         <textarea id="sourceEditor" class="source-editor" spellcheck="false" aria-label="Markdown source" hidden></textarea>
@@ -97,6 +98,12 @@
           </header>
           <div id="blockResultList" class="command-list" role="listbox"></div>
         </section>
+        <footer id="commandPaletteStats" class="command-palette-stats" hidden>
+          <strong id="paletteGraphName"></strong>
+          <span id="paletteGraphFiles"></span>
+          <span id="paletteGraphModified"></span>
+          <span id="paletteGraphSize"></span>
+        </footer>
       </div>
     </div>
     <section id="documentationView" class="documentation-view" aria-label="Documentation" hidden>

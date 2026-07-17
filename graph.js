@@ -6,7 +6,19 @@
   const HANDLE_KEY = 'last-graph';
   const markdownFile = /\.(md|markdown)$/i;
 
-  const normalizePage = value => String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  const normalizePage = value => {
+    let normalized = String(value || '').trim().replace(/___/g, '/');
+    try { normalized = decodeURIComponent(normalized); } catch {}
+    return normalized.normalize('NFC').replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').toLocaleLowerCase();
+  };
+  function resolveAssetPath(reference, fromFolder = 'pages') {
+    const raw = String(reference || '').trim().replace(/^<|>$/g, '').split(/[?#]/)[0];
+    let decoded = raw; try { decoded = decodeURIComponent(raw); } catch {}
+    const parts = `${decoded.startsWith('/') ? '' : fromFolder}/${decoded}`.replace(/\\/g, '/').split('/').filter(Boolean);
+    const normalized = [];
+    for (const part of parts) { if (part === '.') continue; if (part === '..') normalized.pop(); else normalized.push(part); }
+    return normalized.join('/');
+  }
   const newId = () => crypto.randomUUID?.() || `markd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const hash = value => {
     let result = 2166136261;
@@ -148,12 +160,16 @@
   }
 
   function pageTitle(content, filename) {
+    const rawBase = filename.replace(/\.(md|markdown)$/i, '');
+    const namespacedFile = /___|%2f/i.test(rawBase);
+    const base = rawBase.replace(/___/g, '/');
+    let decodedBase = base; try { decodedBase = decodeURIComponent(base); } catch {}
     const property = content.match(/^\s*title::\s*(.+?)\s*$/mi)?.[1];
-    if (property) return property;
+    if (property && (!namespacedFile || property.includes('/'))) return property;
+    if (namespacedFile) return decodedBase;
     const heading = content.match(/^#\s+(.+?)\s*$/m)?.[1];
     if (heading && !/^\s*[-+*]\s/.test(content)) return heading;
-    const base = filename.replace(/\.(md|markdown)$/i, '').replace(/___/g, '/');
-    try { return decodeURIComponent(base); } catch { return base; }
+    return decodedBase;
   }
 
   function safeFilename(title) {
@@ -351,17 +367,31 @@
       this.assetUrls.forEach(url => URL.revokeObjectURL(url)); this.assetUrls.clear();
     }
 
+    async stats() {
+      let files = 0; let size = 0; let lastModified = 0; let skipped = 0;
+      const walk = async directory => {
+        try {
+          for await (const [, handle] of directory.entries()) {
+            try {
+              if (handle.kind === 'directory') await walk(handle);
+              else {
+                const file = await handle.getFile(); files++; size += file.size; lastModified = Math.max(lastModified, file.lastModified || 0);
+              }
+            } catch { skipped++; }
+          }
+        } catch { skipped++; }
+      };
+      await walk(this.handle); return { files, size, lastModified, partial: skipped > 0 };
+    }
+
     async assetUrl(reference, fromFolder = 'pages') {
       if (/^[a-z]+:/i.test(reference) || reference.startsWith('#')) return reference;
-      const decoded = decodeURIComponent(reference.split(/[?#]/)[0]);
-      const parts = `${reference.startsWith('/') ? '' : fromFolder}/${decoded}`.split('/').filter(Boolean);
-      const normalized = [];
-      for (const part of parts) { if (part === '.') continue; if (part === '..') normalized.pop(); else normalized.push(part); }
-      const key = normalized.join('/');
+      const key = resolveAssetPath(reference, fromFolder);
       if (this.assetUrls.has(key)) return this.assetUrls.get(key);
       let directory = this.handle;
-      for (const part of normalized.slice(0, -1)) directory = await directory.getDirectoryHandle(part);
-      const handle = await directory.getFileHandle(normalized.at(-1));
+      const parts = key.split('/');
+      for (const part of parts.slice(0, -1)) directory = await directory.getDirectoryHandle(part);
+      const handle = await directory.getFileHandle(parts.at(-1));
       const url = URL.createObjectURL(await handle.getFile()); this.assetUrls.set(key, url); return url;
     }
   }
@@ -473,12 +503,20 @@
 
     disposeAssets() {}
 
+    async stats() {
+      try {
+        const payload = await this.api('/stats');
+        return { files: Number(payload.files) || 0, size: Number(payload.size) || 0, lastModified: Number(payload.lastModified) || 0, partial: Boolean(payload.partial) };
+      } catch {
+        const content = this.pages.map(page => page.content || '').join('');
+        const timestamps = this.pages.map(page => Number(page.lastModified)).filter(value => Number.isFinite(value) && value > 0).map(value => value > 1e15 ? value / 1e6 : value);
+        return { files: this.pages.length, size: new Blob([content]).size, lastModified: timestamps.length ? Math.max(...timestamps) : 0, partial: true };
+      }
+    }
+
     async assetUrl(reference, fromFolder = 'pages') {
       if (/^[a-z]+:/i.test(reference) || reference.startsWith('#')) return reference;
-      const decoded = decodeURIComponent(reference.split(/[?#]/)[0]);
-      const parts = `${reference.startsWith('/') ? '' : fromFolder}/${decoded}`.split('/').filter(Boolean); const normalized = [];
-      for (const part of parts) { if (part === '.') continue; if (part === '..') normalized.pop(); else normalized.push(part); }
-      return `${this.baseUrl}/asset?path=${encodeURIComponent(normalized.join('/'))}`;
+      return `${this.baseUrl}/asset?path=${encodeURIComponent(resolveAssetPath(reference, fromFolder))}`;
     }
   }
 
@@ -511,6 +549,9 @@
       const key = normalizePage(page.title);
       const document = parseDocument(content);
       this.pages.set(key, page);
+      const filename = page.name || page.path?.split('/').at(-1) || '';
+      const filenameTitle = pageTitle('', filename);
+      if (filenameTitle) this.pages.set(normalizePage(filenameTitle), page);
       this.documents.set(key, document);
       if (page.journalDate) {
         const [year, month, day] = page.journalDate.split('-').map(Number); const date = new Date(year, month - 1, day);
@@ -545,9 +586,9 @@
     resolvePage(title) { return this.pages.get(normalizePage(title)); }
     resolveBlock(uuid) { return this.uuids.get(normalizePage(uuid)); }
     referencesToPage(title) {
-      const page = this.resolvePage(title); if (!page) return this.pageLinks.get(normalizePage(title)) || [];
-      const aliases = [...this.pages].filter(([, candidate]) => candidate === page).map(([key]) => key);
-      const references = aliases.flatMap(key => this.pageLinks.get(key) || []);
+      const page = this.resolvePage(title);
+      const aliases = page ? [...this.pages].filter(([, candidate]) => candidate === page).map(([key]) => key) : [normalizePage(title)];
+      const references = aliases.flatMap(key => [...(this.pageLinks.get(key) || []), ...(this.tagLinks.get(key) || [])]);
       return [...new Map(references.map(item => [`${item.page.path}:${item.block.id}`, item])).values()];
     }
     referencesToBlock(uuid) { return this.blockLinks.get(normalizePage(uuid)) || []; }
@@ -591,7 +632,7 @@
 
   window.MarkdGraph = {
     GraphStore, RemoteGraphStore, GraphIndex, ConflictError, parseDocument, serializeDocument, flattenBlocks,
-    propertiesFrom, pageReferences, blockReferences, normalizePage, replacePageReferences,
+    propertiesFrom, pageReferences, blockReferences, pageTitle, normalizePage, resolveAssetPath, replacePageReferences,
     saveDraft, getDraft, removeDraft, journalInfo, formatJournalDate, parseJournalDate, newId
   };
 })();

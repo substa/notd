@@ -276,6 +276,8 @@ Available themes:
 
 The selected theme persists in the browser.
 
+Fonts and the main colors for all three themes can be customized in `theme-config.css`. This file is loaded after the application stylesheet, so its CSS variables override the defaults without requiring changes to `styles.css`.
+
 ## Privacy and security
 
 In local mode, content is not sent to external services. In LAN mode, content is exchanged only with the configured markd server.

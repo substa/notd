@@ -217,6 +217,22 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 return self.stream_events()
             if parsed.path == "/api/graph/status":
                 return self.json_response({"enabled": True, "name": self.graph.name, "config": journal_config(self.graph)})
+            if parsed.path == "/api/graph/stats":
+                files = 0
+                size = 0
+                last_modified = 0.0
+                skipped = 0
+                for root, _, names in os.walk(self.graph, onerror=lambda _: None):
+                    for name in names:
+                        try:
+                            stat = (Path(root) / name).stat()
+                        except OSError:
+                            skipped += 1
+                            continue
+                        files += 1
+                        size += stat.st_size
+                        last_modified = max(last_modified, stat.st_mtime)
+                return self.json_response({"files": files, "size": size, "lastModified": round(last_modified * 1000), "partial": skipped > 0})
             if parsed.path == "/api/graph/files":
                 return self.json_response({"files": self.scan_graph(), "config": journal_config(self.graph)})
             query = parse_qs(parsed.query)

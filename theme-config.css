@@ -1,0 +1,55 @@
+/*
+ * markd theme configuration
+ *
+ * Personalizza i font e i colori qui, senza modificare styles.css.
+ * Per i font installati localmente, inserisci il nome tra virgolette e
+ * conserva almeno un font generico (sans-serif, serif o monospace) alla fine.
+ */
+
+:root {
+  /* Font */
+  --ui: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --body: "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --heading: "New York", "Iowan Old Style", Baskerville, "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: MarkdMono, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Tema chiaro */
+  --bg: #ffffff;
+  --chrome: #fbfbfb;
+  --text: #292d32;
+  --muted: #7d838b;
+  --faint: #dcdfe3;
+  --border: #e8eaed;
+  --accent: #3f7fba;
+  --selection: #c5def3;
+  --code: #f4f5f6;
+  --quote: #858b92;
+}
+
+/* Tema seppia */
+.theme-sepia {
+  --bg: #f7f1e3;
+  --chrome: #f5efdf;
+  --text: #4c463b;
+  --muted: #827969;
+  --faint: #d6cebc;
+  --border: #dfd7c5;
+  --accent: #8a6946;
+  --selection: #d8c69f;
+  --code: #ede5d3;
+  --quote: #8b8272;
+}
+
+/* Tema scuro */
+.theme-dark {
+  --bg: #292b2e;
+  --chrome: #25272a;
+  --text: #d9dadd;
+  --muted: #92969c;
+  --faint: #47494d;
+  --border: #393b3e;
+  --accent: #79aeda;
+  --selection: #365b78;
+  --code: #34363a;
+  --quote: #9ca0a6;
+}
