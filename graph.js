@@ -366,6 +366,122 @@
     }
   }
 
+  class RemoteGraphStore {
+    constructor(status, baseUrl = '/api/graph') {
+      this.baseUrl = baseUrl;
+      this.name = status.name || 'Server graph';
+      this.config = { ...defaultJournalConfig, ...(status.config || {}) };
+      this.pages = [];
+      this.isRemote = true;
+      this.clientId = newId();
+    }
+
+    static async connect(baseUrl = '/api/graph') {
+      const response = await fetch(`${baseUrl}/status`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('No server graph is available');
+      const status = await response.json();
+      if (!status.enabled) throw new Error('The server graph is disabled');
+      return new RemoteGraphStore(status, baseUrl);
+    }
+
+    async api(path, options = {}) {
+      const response = await fetch(`${this.baseUrl}${path}`, { cache: 'no-store', ...options });
+      if (response.ok) return response.json();
+      let message = `Graph server error (${response.status})`;
+      try { message = (await response.json()).error || message; } catch {}
+      if (response.status === 409) throw new ConflictError(message);
+      throw new Error(message);
+    }
+
+    async ensurePermission() { return true; }
+
+    subscribe(listener) {
+      const events = new EventSource(`${this.baseUrl}/events`);
+      events.onmessage = message => {
+        try {
+          const event = JSON.parse(message.data);
+          if (event.clientId !== this.clientId) listener(event);
+        } catch {}
+      };
+      return () => events.close();
+    }
+
+    pageFromFile(file) {
+      const folder = file.folder || '';
+      const journal = /^journals(?:\/|$)/.test(folder);
+      const journalDateValue = journal ? parseJournalDate(file.name, this.config.fileNameFormat) : null;
+      const explicitTitle = file.content.match(/^\s*title::\s*(.+?)\s*$/mi)?.[1];
+      const journalTitle = journalDateValue ? explicitTitle || formatJournalDate(journalDateValue, this.config.pageTitleFormat) : null;
+      return {
+        title: journalTitle || pageTitle(file.content, file.name), name: file.name, path: file.path, folder,
+        content: file.content, lastModified: file.revision, journal,
+        journalDate: journalDateValue ? formatJournalDate(journalDateValue, 'yyyy-MM-dd') : null
+      };
+    }
+
+    async scan() {
+      const payload = await this.api('/files');
+      this.config = { ...defaultJournalConfig, ...(payload.config || {}) };
+      this.pages = payload.files.map(file => this.pageFromFile(file)).sort((a, b) => a.title.localeCompare(b.title));
+      return this.pages;
+    }
+
+    findPage(title) {
+      const key = normalizePage(title);
+      return this.pages.find(page => normalizePage(page.title) === key);
+    }
+
+    async createPage(title, options = {}) {
+      const existing = this.findPage(title); if (existing) return existing;
+      const folder = options.folder || (options.journal ? 'journals' : 'pages');
+      const journalDateValue = options.journalDate || (options.journal ? new Date() : null);
+      const journalFilename = journalDateValue ? formatJournalDate(journalDateValue, this.config.fileNameFormat) : null;
+      const name = `${options.filename || journalFilename || safeFilename(title)}.md`;
+      const page = {
+        title, name, path: `${folder}/${name}`, folder, content: '', lastModified: null,
+        journal: folder === 'journals', journalDate: journalDateValue ? formatJournalDate(journalDateValue, 'yyyy-MM-dd') : null
+      };
+      await this.writePage(page, options.content || '- ', { force: true, create: true });
+      this.pages.push(page); this.pages.sort((a, b) => a.title.localeCompare(b.title)); return page;
+    }
+
+    async writePage(page, content, options = {}) {
+      const payload = await this.api('/file', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: page.path, content, expectedRevision: page.lastModified, force: Boolean(options.force), create: Boolean(options.create), clientId: this.clientId })
+      });
+      page.content = content; page.lastModified = payload.revision; return page;
+    }
+
+    async renamePage(page, title, content) {
+      const duplicate = this.findPage(title); if (duplicate && duplicate !== page) throw new Error('A page with this name already exists');
+      const folder = page.folder || 'pages'; const name = `${safeFilename(title)}.md`; const target = `${folder}/${name}`;
+      if (target === page.path) { await this.writePage(page, content); page.title = title; return page; }
+      const payload = await this.api('/rename', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: page.path, target, content, expectedRevision: page.lastModified, clientId: this.clientId })
+      });
+      const renamed = { ...page, title, name, path: payload.path, content, lastModified: payload.revision };
+      this.pages = this.pages.filter(item => item !== page); this.pages.push(renamed); this.pages.sort((a, b) => a.title.localeCompare(b.title));
+      await removeDraft(page.path).catch(() => {}); return renamed;
+    }
+
+    async freshFile(page) {
+      const payload = await this.api(`/file?path=${encodeURIComponent(page.path)}`);
+      return { content: payload.content, lastModified: payload.revision };
+    }
+
+    disposeAssets() {}
+
+    async assetUrl(reference, fromFolder = 'pages') {
+      if (/^[a-z]+:/i.test(reference) || reference.startsWith('#')) return reference;
+      const decoded = decodeURIComponent(reference.split(/[?#]/)[0]);
+      const parts = `${reference.startsWith('/') ? '' : fromFolder}/${decoded}`.split('/').filter(Boolean); const normalized = [];
+      for (const part of parts) { if (part === '.') continue; if (part === '..') normalized.pop(); else normalized.push(part); }
+      return `${this.baseUrl}/asset?path=${encodeURIComponent(normalized.join('/'))}`;
+    }
+  }
+
   class GraphIndex {
     constructor(pages = []) {
       this.contentOverrides = new Map();
@@ -474,7 +590,7 @@
   }
 
   window.MarkdGraph = {
-    GraphStore, GraphIndex, ConflictError, parseDocument, serializeDocument, flattenBlocks,
+    GraphStore, RemoteGraphStore, GraphIndex, ConflictError, parseDocument, serializeDocument, flattenBlocks,
     propertiesFrom, pageReferences, blockReferences, normalizePage, replacePageReferences,
     saveDraft, getDraft, removeDraft, journalInfo, formatJournalDate, parseJournalDate, newId
   };

@@ -10,6 +10,21 @@ python3 -m http.server 4173
 
 Open [http://localhost:4173](http://localhost:4173).
 
+### Share one graph on the LAN
+
+To serve the app together with a writable graph:
+
+```bash
+python3 server.py \
+  --host 0.0.0.0 \
+  --port 4176 \
+  --graph /absolute/path/to/your/logseq-graph
+```
+
+Open `http://localhost:4176` on the host or `http://192.168.1.10:4176` from another device. The app detects the server graph automatically; every client reads and writes the same Markdown files. Server-Sent Events propagate saves immediately to the other clients, while a lightweight watcher detects edits made directly by Logseq within about one second. Autosave and conflict detection remain active.
+
+The API has no authentication. Bind to `0.0.0.0` only on a trusted LAN and do not expose this port to the internet. The default host is `127.0.0.1`.
+
 Run the graph parser/index tests with:
 
 ```bash
@@ -41,11 +56,12 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - nested blocks with keyboard indentation, reordering, collapse, zoom, and task cycling;
 - `[[page references]]`, page creation/autocomplete, `((block references))`, linked and unlinked references;
 - graph-wide page switching and block search from the command palette;
-- daily journals and safe page renaming with optional reference updates.
+- daily journals and safe page renaming with optional reference updates;
+- complete built-in documentation, always available with `?` or from the command palette.
 
 ## Privacy
 
-No content is sent to a server. Automatic document copies are stored in `localStorage`; graph recovery drafts and the selected directory handle are stored in IndexedDB. The Markdown files in the selected graph remain the source of truth, and the service worker caches only the app’s assets.
+In direct local mode, no content is sent to a server. Automatic document copies are stored in `localStorage`; graph recovery drafts and the selected directory handle are stored in IndexedDB. When `server.py --graph` is used, content is exchanged only with that markd server so LAN clients can share the graph. The Markdown files in the selected or served graph remain the source of truth.
 
 ## Local graph support
 

@@ -12,6 +12,8 @@
   const references = $('#references');
   const graphName = $('#graphName');
   const graphAutocomplete = $('#graphAutocomplete');
+  const documentationView = $('#documentationView');
+  const documentationContent = $('#documentationContent');
   const journalDatePicker = $('#journalDatePicker');
   const fileName = $('#fileName');
   const fileInput = $('#fileInput');
@@ -30,6 +32,9 @@
   let graphHistoryIndex = -1;
   let graphStore = null;
   let graphIndex = null;
+  let closeRemoteEvents = null;
+  let remoteRefreshTimer = null;
+  let remoteRefreshPending = false;
   let activeGraphBlock = null;
   let graphDraftTimer = null;
   let activeSourceBlock = null;
@@ -530,6 +535,7 @@ Open, save, export, and reach recent documents or headings from the command pale
           state.dirty = false; app.classList.remove('dirty'); saveState.textContent = 'Saved';
         }
         state.graphConflict = false;
+        if (remoteRefreshPending) scheduleRemoteRefresh();
         return true;
       } catch (error) {
         saveState.textContent = 'Save failed'; if (interactive) toast(error.message || 'Could not save the page');
@@ -604,6 +610,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     try {
       if (state.graphMode && state.dirty && !(await flushGraphSave(true))) return;
       saveState.textContent = 'Opening graph…';
+      closeRemoteEvents?.(); closeRemoteEvents = null;
       graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open();
       const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
       journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
@@ -646,7 +653,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   async function closeGraph() {
     if (state.dirty && !(await flushGraphSave(true))) return;
-    graphStore?.disposeAssets();
+    closeRemoteEvents?.(); closeRemoteEvents = null; graphStore?.disposeAssets();
     state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1;
     outliner.hidden = true; graphName.hidden = true; app.classList.remove('graph-mode', 'journal-mode');
     const docs = getStoredDocs();
@@ -1247,6 +1254,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     } else if (key === 'r') { vimPending = 'r'; updateVimUi(); }
     else if (key === '/') showCommandPalette();
     else if (key === ':') showCommandPalette();
+    else if (key === '?') showDocumentation();
   }
 
   function handleVimKeydown(event) {
@@ -1350,6 +1358,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function loadMarkdown(markdown, name = 'Untitled', options = {}) {
+    if (state.graphMode && graphStore?.isRemote) { closeRemoteEvents?.(); closeRemoteEvents = null; }
     state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false; state.journalMode = false;
     outliner.hidden = true; graphName.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
     app.classList.remove('graph-mode', 'journal-mode', 'source-mode'); updateVimUi();
@@ -1640,6 +1649,37 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (window.find) window.find(value, false, direction, true, false, false, false);
   }
 
+  let documentationLoaded = false;
+  let documentationReturnFocus = null;
+  async function showDocumentation() {
+    documentationReturnFocus = activeMarkdownField() || document.activeElement;
+    documentationView.hidden = false; app.classList.add('documentation-open');
+    if (!documentationLoaded) {
+      documentationContent.innerHTML = '<p>Loading documentation…</p>';
+      try {
+        const response = await fetch('./DOCUMENTATION.md');
+        if (!response.ok) throw new Error('Documentation is unavailable');
+        documentationContent.innerHTML = markdownToHtml(await response.text());
+        const used = new Set();
+        $$('h1,h2,h3,h4,h5,h6', documentationContent).forEach((heading, index) => {
+          let id = heading.textContent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `section-${index}`;
+          while (used.has(id)) id = `${id}-${index}`; used.add(id); heading.id = id;
+        });
+        documentationLoaded = true;
+      } catch (error) {
+        documentationContent.innerHTML = `<p>${escapeHtml(error.message || 'Could not load the documentation.')}</p>`;
+      }
+    }
+    if (!documentationView.hidden) requestAnimationFrame(() => $('#documentationClose').focus());
+  }
+
+  function closeDocumentation() {
+    if (documentationView.hidden) return;
+    documentationView.hidden = true; app.classList.remove('documentation-open');
+    if (documentationReturnFocus?.isConnected) documentationReturnFocus.focus();
+    else $('#commandButton').focus();
+  }
+
   function exportHtml() {
     const body = markdownToHtml(currentMarkdown());
     const title = escapeHtml(fileName.value || 'Document');
@@ -1743,13 +1783,14 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   const commands = [
+    { label: 'Documentation', shortcut: '?', keywords: 'help guide manual shortcuts', run: showDocumentation },
     { label: 'Open local graph', keywords: 'folder logseq graph local', run: () => requestAction(openGraph) },
     { label: 'New graph page', keywords: 'page create graph', run: () => requestAction(createGraphPage) },
     { label: 'Today journal', shortcut: '⇧⌘ J', keywords: 'daily notes journal today', run: () => requestAction(openToday) },
     { label: 'Previous page', shortcut: 'Alt ←', keywords: 'history back navigate', run: () => navigateGraphHistory(-1) },
     { label: 'Next page', shortcut: 'Alt →', keywords: 'history forward navigate', run: () => navigateGraphHistory(1) },
-    { label: '/yesterday', keywords: 'journal previous day ieri', run: () => requestAction(() => openJournalDate(relativeJournalDate(-1))) },
-    { label: '/tomorrow', keywords: 'journal next day domani', run: () => requestAction(() => openJournalDate(relativeJournalDate(1))) },
+    { label: '/yesterday', keywords: 'journal previous day', run: () => requestAction(() => openJournalDate(relativeJournalDate(-1))) },
+    { label: '/tomorrow', keywords: 'journal next day', run: () => requestAction(() => openJournalDate(relativeJournalDate(1))) },
     { label: '/date picker', keywords: 'journal calendar choose select date', run: openJournalDatePicker },
     { label: 'Copy block reference', keywords: 'uuid block reference link', run: copyGraphBlockReference },
     { label: 'Zoom into block', keywords: 'focus block outliner', run: zoomGraphBlock },
@@ -1924,6 +1965,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     closeCommandPalette(false); command(); paletteContext = null;
   });
   $('#commandButton').addEventListener('click', () => showCommandPalette());
+  $('#documentationClose').addEventListener('click', closeDocumentation);
   document.addEventListener('keydown', handleVimKeydown, true);
   document.addEventListener('pointerup', event => {
     if (!state.vimEnabled || state.vimMode !== 'normal') return;
@@ -2055,6 +2097,8 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   document.addEventListener('keydown', event => {
     const mod = event.metaKey || event.ctrlKey; const key = event.key.toLowerCase();
+    if (!documentationView.hidden) { if (event.key === 'Escape') { event.preventDefault(); closeDocumentation(); } return; }
+    if (event.key === '?' && !mod && !event.altKey && !event.target.matches?.('input,textarea,[contenteditable="true"]')) { event.preventDefault(); showDocumentation(); return; }
     if (state.graphMode && mod && event.shiftKey && key === 'j') { event.preventDefault(); requestAction(openToday); return; }
     if (state.graphMode && event.altKey && !mod && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
       event.preventDefault(); navigateGraphHistory(event.key === 'ArrowLeft' ? -1 : 1); return;
@@ -2082,8 +2126,28 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
   let externalCheckTime = 0;
-  async function checkExternalGraphPage() {
-    if (!state.graphMode || !state.graphPage || Date.now() - externalCheckTime < 1500) return;
+  function scheduleRemoteRefresh() {
+    clearTimeout(remoteRefreshTimer);
+    remoteRefreshTimer = setTimeout(() => checkExternalGraphPage(true), 120);
+  }
+
+  function watchRemoteGraph() {
+    closeRemoteEvents?.(); closeRemoteEvents = null;
+    if (!graphStore?.isRemote || !graphStore.subscribe) return;
+    closeRemoteEvents = graphStore.subscribe(event => {
+      const currentPath = state.graphPage?.path;
+      if (event.path === currentPath && event.revision && String(event.revision) === String(state.graphPage.lastModified)) return;
+      if (state.dirty) {
+        remoteRefreshPending = true;
+        if (event.path === currentPath || event.oldPath === currentPath) { state.graphConflict = true; saveState.textContent = 'Conflict'; }
+        return;
+      }
+      scheduleRemoteRefresh();
+    });
+  }
+
+  async function checkExternalGraphPage(force = false) {
+    if (!state.graphMode || !state.graphPage || (!force && Date.now() - externalCheckTime < 1500)) return;
     externalCheckTime = Date.now();
     try {
       if (state.dirty) {
@@ -2094,8 +2158,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       const currentPath = state.graphPage.path; const previousModified = state.graphPage.lastModified;
       const pages = await graphStore.scan(); const current = pages.find(page => page.path === currentPath);
       graphIndex = new MarkdGraph.GraphIndex(pages);
-      if (!current) { saveState.textContent = 'Page removed'; return; }
-      state.graphPage = current; journalDocuments.clear();
+      if (!current) { remoteRefreshPending = false; saveState.textContent = 'Page removed'; return; }
+      state.graphPage = current; journalDocuments.clear(); remoteRefreshPending = false;
       if (current.lastModified !== previousModified) {
         state.graphDocument = MarkdGraph.parseDocument(current.content); restoreGraphCollapse();
         updateStats(); saveState.textContent = 'Reloaded'; toast('Page reloaded from disk');
@@ -2141,6 +2205,12 @@ Open, save, export, and reach recent documents or headings from the command pale
   else loadMarkdown(starter, 'Welcome');
 
   (async () => {
+    try {
+      const remote = await MarkdGraph.RemoteGraphStore.connect();
+      graphStore = remote; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages); watchRemoteGraph();
+      if (!state.dirty) { journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true); }
+      return;
+    } catch {}
     try {
       const restored = await MarkdGraph.GraphStore.restore();
       if (!restored || !(await restored.ensurePermission(false))) return;
