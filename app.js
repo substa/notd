@@ -711,6 +711,36 @@ Open, save, export, and reach recent documents or headings from the command pale
     saveSettings({ lastGraphPage: page.title, recentGraphPages });
   }
 
+  function graphRoute() {
+    const match = location.hash.match(/^#\/(page|journal)\/(.+)$/);
+    if (!match) return null;
+    try { return { path: decodeURIComponent(match[2]), journalMode: match[1] === 'journal' }; }
+    catch { return null; }
+  }
+
+  function graphRouteHash(page, journalMode = false) {
+    return `#/${journalMode ? 'journal' : 'page'}/${encodeURIComponent(page.path)}`;
+  }
+
+  function syncGraphRoute(page, options = {}) {
+    if (!page || options.routeNavigation) return;
+    const hash = graphRouteHash(page, Boolean(options.journalMode));
+    if (location.hash === hash) return;
+    const method = options.replaceRoute || options.historyNavigation ? 'replaceState' : 'pushState';
+    history[method]({ markdPage: page.path }, '', `${location.pathname}${location.search}${hash}`);
+  }
+
+  function pageFromGraphRoute(route) {
+    return route && graphStore?.pages.find(page => page.path === route.path);
+  }
+
+  async function openGraphLanding(options = {}) {
+    const route = graphRoute();
+    const page = pageFromGraphRoute(route);
+    if (page) return loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: true });
+    await openToday(true, { replaceRoute: Boolean(options.replaceRoute) });
+  }
+
   async function navigateGraphHistory(direction) {
     if (!state.graphMode) return;
     updateCurrentHistoryPosition();
@@ -749,6 +779,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     updateVimUi();
     fileName.value = page.title; fileName.readOnly = Boolean(page.journal); document.title = `${page.title} — ${graphStore.name} — markd`;
     rememberGraphPage(page);
+    syncGraphRoute(page, options);
     renderGraphPage(); updateStats();
     saveState.textContent = draftConflict ? 'Recovery conflict' : (draft ? 'Recovered draft' : 'Ready');
     requestAnimationFrame(() => {
@@ -764,7 +795,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       closeRemoteEvents?.(); closeRemoteEvents = null;
       graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open();
       const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
-      journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
+      journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding();
       toast(`Opened ${graphStore.name}`);
     } catch (error) { if (error.name !== 'AbortError') toast(error.message || 'Could not open the graph'); }
   }
@@ -777,7 +808,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       page = await graphStore.createPage(journal.title, { journal: true, journalDate: journal.value, filename: journal.filename });
       graphIndex.rebuild(graphStore.pages);
     }
-    await loadGraphPage(page, { journalMode: true, resetJournalLimit: Boolean(options.reset) });
+    await loadGraphPage(page, { journalMode: true, resetJournalLimit: Boolean(options.reset), replaceRoute: Boolean(options.replaceRoute) });
     const index = orderedJournalPages().findIndex(item => item.path === page.path);
     if (index >= state.journalLimit) { state.journalLimit = index + 1; renderGraphPage(); }
     requestAnimationFrame(() => {
@@ -854,8 +885,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     calendarSelectAction = null; $('#journalCalendarButton').setAttribute('aria-expanded', 'false');
   }
 
-  async function openToday(reset = false) {
-    return openJournalDate(new Date(), { reset });
+  async function openToday(reset = false, options = {}) {
+    return openJournalDate(new Date(), { reset, ...options });
   }
 
   async function closeGraph() {
@@ -929,6 +960,47 @@ Open, save, export, and reach recent documents or headings from the command pale
     location.block.content = field.value; activeGraphBlock.block = location.block; resizeGraphEditor(field); graphChanged(); showGraphAutocomplete(field);
   }
 
+  let pendingSelectionDelimiter = null;
+
+  function flushSelectionDelimiter() {
+    const pending = pendingSelectionDelimiter;
+    pendingSelectionDelimiter = null;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    const { field, key, start, end, value } = pending;
+    if (!field.isConnected || field.value !== value) return;
+    field.setRangeText(key, start, end, 'end');
+    notifyMarkdownField(field);
+  }
+
+  function handleSelectionDelimiter(event) {
+    const pairs = { '~': ['~~', '~~'], '[': ['[[', ']]'], '(': ['((', '))'], '*': ['**', '**'], '_': ['__', '__'] };
+    const field = event.currentTarget;
+    if (!pairs[event.key] || event.metaKey || (event.ctrlKey && !event.altKey) || event.isComposing) {
+      if (pendingSelectionDelimiter) flushSelectionDelimiter();
+      return false;
+    }
+    const start = field.selectionStart; const end = field.selectionEnd;
+    if (start === end) {
+      if (pendingSelectionDelimiter) flushSelectionDelimiter();
+      return false;
+    }
+    const pending = pendingSelectionDelimiter;
+    if (pending && pending.field === field && pending.key === event.key && pending.start === start && pending.end === end && pending.value === field.value) {
+      event.preventDefault(); clearTimeout(pending.timer); pendingSelectionDelimiter = null;
+      const selected = field.value.slice(start, end); const [before, after] = pairs[event.key];
+      field.setRangeText(`${before}${selected}${after}`, start, end, 'end');
+      field.setSelectionRange(start + before.length, start + before.length + selected.length);
+      notifyMarkdownField(field);
+      return true;
+    }
+    if (pending) flushSelectionDelimiter();
+    event.preventDefault();
+    pendingSelectionDelimiter = { field, key: event.key, start, end, value: field.value };
+    pendingSelectionDelimiter.timer = setTimeout(flushSelectionDelimiter, 600);
+    return true;
+  }
+
   function handleWikiPair(event) {
     const field = event.currentTarget;
     if (!state.graphMode || field.selectionStart !== field.selectionEnd) return false;
@@ -983,7 +1055,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   function handleGraphBlockKeydown(event) {
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
     const block = location.block;
-    if (handleWikiPair(event)) return;
+    if (handleSelectionDelimiter(event) || handleWikiPair(event)) return;
     if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
       event.preventDefault(); handleGraphAutocompleteKey(event.key); return;
     }
@@ -1604,6 +1676,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function handleSourceBlockKeydown(event) {
+    if (handleSelectionDelimiter(event) || handleWikiPair(event)) return;
     const source = event.currentTarget; const start = source.selectionStart; const end = source.selectionEnd;
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopPropagation(); commitActiveBlock(); editor.focus(); return;
@@ -1673,6 +1746,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function loadMarkdown(markdown, name = 'Untitled', options = {}) {
     if (state.graphMode && graphStore?.isRemote) { closeRemoteEvents?.(); closeRemoteEvents = null; }
+    if (graphRoute() && !options.preserveGraphRoute) history.pushState({}, '', `${location.pathname}${location.search}`);
     state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false; state.journalMode = false;
     outliner.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
     app.classList.remove('graph-mode', 'journal-mode', 'source-mode'); updateVimUi();
@@ -2118,6 +2192,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     { label: 'Italic', shortcut: '⌘ I', keywords: 'italic', run: () => wrapMarkdownSelection('*') },
     { label: 'Inline code', shortcut: '⌘ `', keywords: 'code', run: () => wrapMarkdownSelection('`') },
     { label: 'Strikethrough', keywords: 'strike', run: () => wrapMarkdownSelection('~~') },
+    { label: 'Page reference', keywords: 'page wiki brackets reference', run: () => wrapMarkdownSelection('[[', ']]', 'page') },
+    { label: 'Block reference', keywords: 'block parentheses reference', run: () => wrapMarkdownSelection('((', '))', 'block id') },
     { label: 'Link', keywords: 'link url', run: () => wrapMarkdownSelection('[', '](https://)', 'text') },
     { label: 'Image', keywords: 'photo image url', run: () => wrapMarkdownSelection('![', '](https://)', 'description') },
     { label: 'Bulleted list', shortcut: '⇧⌘ 8', keywords: 'list bullet', run: () => prefixMarkdownLines('- ') },
@@ -2334,6 +2410,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       state.graphPage = renamed; state.graphDocument = MarkdGraph.parseDocument(currentContent); restoreGraphCollapse(); state.dirty = false;
       graphIndex = new MarkdGraph.GraphIndex(graphStore.pages); fileName.value = nextTitle;
       document.title = `${nextTitle} — ${graphStore.name} — markd`; saveSettings({ lastGraphPage: nextTitle });
+      syncGraphRoute(renamed, { journalMode: state.journalMode, replaceRoute: true });
       renderGraphPage(); saveState.textContent = 'Saved'; toast('Page renamed');
     } catch (error) { fileName.value = page.title; toast(error.message || 'Could not rename the page'); }
   }
@@ -2457,7 +2534,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     changed();
   });
   sourceEditor.addEventListener('input', changed);
-  sourceEditor.addEventListener('keydown', handleWikiPair);
+  sourceEditor.addEventListener('keydown', event => {
+    if (handleSelectionDelimiter(event)) return;
+    handleWikiPair(event);
+  });
   editor.addEventListener('paste', event => {
     if (event.target.matches?.('.md-source-block')) return;
     event.preventDefault();
@@ -2618,6 +2698,19 @@ Open, save, export, and reach recent documents or headings from the command pale
     } catch {}
   }
   window.addEventListener('focus', checkExternalGraphPage);
+  window.addEventListener('popstate', async () => {
+    const route = graphRoute();
+    if (!route) {
+      if (!state.graphMode) return;
+      if (state.dirty && !(await flushGraphSave(true))) return;
+      loadInitialDocument();
+      return;
+    }
+    if (!graphStore || !graphIndex) return;
+    const page = pageFromGraphRoute(route);
+    if (!page) return toast('Page in URL not found in this graph');
+    await loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: true, resetJournalLimit: route.journalMode });
+  });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkExternalGraphPage(); else if (state.graphMode) flushGraphSave(false); });
   let journalScrollLoading = false;
   markdWrap.addEventListener('scroll', () => {
@@ -2648,10 +2741,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (docs.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(docs.slice(0, 10)));
     saveSettings({ welcomeVersion: WELCOME_VERSION });
   }
-  function loadInitialDocument() {
+  function loadInitialDocument(options = {}) {
     const storedDocs = getStoredDocs();
-    if (storedDocs.length) loadMarkdown(storedDocs[0].markdown, storedDocs[0].name, { id: storedDocs[0].id });
-    else loadMarkdown(starter, 'Welcome');
+    if (storedDocs.length) loadMarkdown(storedDocs[0].markdown, storedDocs[0].name, { id: storedDocs[0].id, ...options });
+    else loadMarkdown(starter, 'Welcome', options);
   }
 
   app.classList.add('initial-loading');
@@ -2661,7 +2754,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const remote = await MarkdGraph.RemoteGraphStore.connect();
       graphStore = remote; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages); watchRemoteGraph();
       if (state.dirty) return;
-      journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
+      journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding({ replaceRoute: true });
       return;
     } catch {}
     try {
@@ -2669,11 +2762,11 @@ Open, save, export, and reach recent documents or headings from the command pale
       if (restored && await restored.ensurePermission(false)) {
         graphStore = restored; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
         if (state.dirty) return;
-        journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
+        journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding({ replaceRoute: true });
         return;
       }
     } catch {}
-    if (!state.dirty) loadInitialDocument();
+    if (!state.dirty) loadInitialDocument({ preserveGraphRoute: Boolean(graphRoute()) });
   })().finally(() => app.classList.remove('initial-loading'));
 
   if ('launchQueue' in window) {

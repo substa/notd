@@ -162,6 +162,7 @@ body {
 .editor h4 { font-size: 1.08em; }
 
 .editor a,
+.graph-block-content a,
 .graph-page-ref,
 .graph-block-ref,
 .graph-tag,
@@ -170,7 +171,11 @@ body {
   text-decoration-color: color-mix(in srgb, var(--accent), transparent 65%);
   text-underline-offset: .15em;
 }
-.editor a:hover { text-decoration-thickness: 1px; }
+.editor a:hover,
+.graph-block-content a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
 .editor strong { font-weight: 700; }
 .editor blockquote {
   margin: 1.4em 0;

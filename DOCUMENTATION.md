@@ -258,6 +258,8 @@ Direct local-file saving requires the File System Access API. Other browsers use
 | Italic | `*text*` |
 | Strikethrough | `~~text~~` |
 | Inline code | `` `code` `` |
+| Page reference | `[[page]]` |
+| Block reference | `((block-id))` |
 | Link | `[text](https://example.com)` |
 | Image | `![alt](path)` |
 | Task | `- [ ] task` |
@@ -265,6 +267,8 @@ Direct local-file saving requires the File System Access API. Other browsers use
 | Code block | Three backticks |
 
 Headings, ordered lists, bullet lists, tables, dividers, frontmatter, and fenced code blocks are also supported.
+
+To wrap selected text directly from the keyboard, type the opening character twice: `~~` creates strikethrough, `[[` creates a page reference, `((` creates a block reference, and `**` or `__` creates bold text. The commands are also available in the command palette.
 
 ## Themes
 
