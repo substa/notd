@@ -191,6 +191,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     return new RegExp(`^\\s*${marker[0]}{${marker.length},}\\s*$`).test(line);
   }
 
+  function orgQuoteOpening(line = '') { return /^\s*#\+BEGIN_QUOTE\b.*$/i.test(line); }
+  function orgQuoteClosing(line = '') { return /^\s*#\+END_QUOTE\s*$/i.test(line); }
+
   function inlineMarkdown(text) {
     let value = escapeHtml(text);
     const code = [];
@@ -213,7 +216,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   function isBlockStart(lines, i) {
     const line = lines[i] || '';
     const next = lines[i + 1] || '';
-    return /^\s*(#{1,6})\s+/.test(line) || /^\s*(```|~~~)/.test(line) || /^\s*>/.test(line) ||
+    return /^\s*(#{1,6})\s+/.test(line) || /^\s*(```|~~~)/.test(line) || orgQuoteOpening(line) || /^\s*>/.test(line) ||
       /^\s*([-+*]|\d+\.)\s+/.test(line) || /^\s*((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$/.test(line) ||
       (line.includes('|') && /^\s*\|?\s*:?-{3,}/.test(next));
   }
@@ -256,6 +259,13 @@ Open, save, export, and reach recent documents or headings from the command pale
 
       if (/^\s*((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$/.test(line)) {
         html.push('<hr>'); i++; continue;
+      }
+
+      if (orgQuoteOpening(line)) {
+        const quote = []; i++;
+        while (i < lines.length && !orgQuoteClosing(lines[i])) quote.push(lines[i++]);
+        if (i < lines.length) i++;
+        html.push(`<blockquote>${markdownToHtml(quote.join('\n'))}</blockquote>`); continue;
       }
 
       if (/^\s*>/.test(line)) {
@@ -437,6 +447,14 @@ Open, save, export, and reach recent documents or headings from the command pale
       text = [];
     };
     for (let index = 0; index < lines.length;) {
+      if (orgQuoteOpening(lines[index])) {
+        flushText();
+        const quote = []; index++;
+        while (index < lines.length && !orgQuoteClosing(lines[index])) quote.push(lines[index++]);
+        if (index < lines.length) index++;
+        html.push(`<blockquote>${graphTextHtml(quote.join('\n'), block)}</blockquote>`);
+        continue;
+      }
       const opening = fenceOpening(lines[index]);
       if (!opening) { text.push(lines[index]); index++; continue; }
       flushText();
@@ -452,8 +470,10 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function graphDisplayContent(block) {
     const propertyLines = [];
-    let activeFence = null;
+    let activeFence = null; let activeOrgQuote = false;
     const visible = String(block.content || '').split('\n').filter(line => {
+      if (!activeFence && !activeOrgQuote && orgQuoteOpening(line)) { activeOrgQuote = true; return true; }
+      if (activeOrgQuote) { if (orgQuoteClosing(line)) activeOrgQuote = false; return true; }
       const opening = !activeFence && fenceOpening(line);
       if (opening) { activeFence = opening.marker; return true; }
       if (activeFence) {
@@ -592,7 +612,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const field = document.createElement('textarea');
     field.className = 'graph-block-editor'; field.spellcheck = true; field.value = block.content;
     if (field.value.split('\n').some(line => fenceOpening(line))) field.classList.add('graph-code-editor');
-    else if (field.value && field.value.split('\n').every(line => /^\s*>/.test(line))) field.classList.add('graph-quote-editor');
+    else if (field.value && (field.value.split('\n').every(line => /^\s*>/.test(line)) || field.value.split('\n').some(orgQuoteOpening))) field.classList.add('graph-quote-editor');
     field.dataset.blockId = block.id;
     field.addEventListener('beforeinput', event => {
       if (matchMedia('(max-width:720px)').matches && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
@@ -711,33 +731,46 @@ Open, save, export, and reach recent documents or headings from the command pale
     saveSettings({ lastGraphPage: page.title, recentGraphPages });
   }
 
-  function graphRoute() {
-    const match = location.hash.match(/^#\/(page|journal)\/(.+)$/);
-    if (!match) return null;
-    try { return { path: decodeURIComponent(match[2]), journalMode: match[1] === 'journal' }; }
-    catch { return null; }
+  function graphRoutePath(page) {
+    const journal = page.journal || page.path.startsWith('journals/');
+    let name = journal ? page.path.replace(/^journals\//, '').replace(/\.(?:md|markdown)$/i, '') : page.title;
+    name = name.split('/').filter(Boolean).map(part => encodeURIComponent(part)).join('/');
+    return `/${journal ? 'journals' : 'pages'}/${name}`;
   }
 
-  function graphRouteHash(page, journalMode = false) {
-    return `#/${journalMode ? 'journal' : 'page'}/${encodeURIComponent(page.path)}`;
+  function graphRoute() {
+    const clean = location.pathname.match(/^\/(pages|journals)\/(.+?)\/?$/);
+    if (clean) {
+      try { return { cleanPath: `/${clean[1]}/${decodeURIComponent(clean[2])}`, journalMode: clean[1] === 'journals' }; }
+      catch { return null; }
+    }
+    const legacy = location.hash.match(/^#\/(page|journal)\/(.+)$/);
+    if (!legacy) return null;
+    try { return { path: decodeURIComponent(legacy[2]), journalMode: legacy[1] === 'journal', legacy: true }; }
+    catch { return null; }
   }
 
   function syncGraphRoute(page, options = {}) {
     if (!page || options.routeNavigation) return;
-    const hash = graphRouteHash(page, Boolean(options.journalMode));
-    if (location.hash === hash) return;
+    const path = graphRoutePath(page);
+    if (location.pathname === path && !location.hash) return;
     const method = options.replaceRoute || options.historyNavigation ? 'replaceState' : 'pushState';
-    history[method]({ markdPage: page.path }, '', `${location.pathname}${location.search}${hash}`);
+    history[method]({ markdPage: page.path }, '', `${path}${location.search}`);
   }
 
   function pageFromGraphRoute(route) {
-    return route && graphStore?.pages.find(page => page.path === route.path);
+    if (!route) return null;
+    if (route.path) return graphStore?.pages.find(page => page.path === route.path);
+    return graphStore?.pages.find(page => {
+      try { return decodeURIComponent(graphRoutePath(page)) === route.cleanPath; }
+      catch { return false; }
+    }) || null;
   }
 
   async function openGraphLanding(options = {}) {
     const route = graphRoute();
     const page = pageFromGraphRoute(route);
-    if (page) return loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: true });
+    if (page) return loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: !route.legacy, replaceRoute: Boolean(route.legacy) });
     await openToday(true, { replaceRoute: Boolean(options.replaceRoute) });
   }
 
@@ -954,7 +987,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   function handleGraphBlockInput(event) {
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
     const code = field.value.split('\n').some(line => fenceOpening(line));
-    const quote = !code && field.value && field.value.split('\n').every(line => /^\s*>/.test(line));
+    const quote = !code && field.value && (field.value.split('\n').every(line => /^\s*>/.test(line)) || field.value.split('\n').some(orgQuoteOpening));
     field.classList.toggle('graph-code-editor', code);
     field.classList.toggle('graph-quote-editor', Boolean(quote));
     location.block.content = field.value; activeGraphBlock.block = location.block; resizeGraphEditor(field); graphChanged(); showGraphAutocomplete(field);
@@ -1746,7 +1779,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function loadMarkdown(markdown, name = 'Untitled', options = {}) {
     if (state.graphMode && graphStore?.isRemote) { closeRemoteEvents?.(); closeRemoteEvents = null; }
-    if (graphRoute() && !options.preserveGraphRoute) history.pushState({}, '', `${location.pathname}${location.search}`);
+    if (graphRoute() && !options.preserveGraphRoute) history.pushState({}, '', `/${location.search}`);
     state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false; state.journalMode = false;
     outliner.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
     app.classList.remove('graph-mode', 'journal-mode', 'source-mode'); updateVimUi();
@@ -2709,7 +2742,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!graphStore || !graphIndex) return;
     const page = pageFromGraphRoute(route);
     if (!page) return toast('Page in URL not found in this graph');
-    await loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: true, resetJournalLimit: route.journalMode });
+    await loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: !route.legacy, replaceRoute: Boolean(route.legacy), resetJournalLimit: route.journalMode });
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkExternalGraphPage(); else if (state.graphMode) flushGraphSave(false); });
   let journalScrollLoading = false;

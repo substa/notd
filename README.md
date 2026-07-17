@@ -56,7 +56,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - nested blocks with keyboard indentation, reordering, collapse, zoom, and task cycling;
 - `[[page references]]`, page creation/autocomplete, `((block references))`, linked and unlinked references;
 - graph-wide page switching and block search from the command palette;
-- unique, copyable client-side URLs for graph pages and journals, with browser back/forward navigation;
+- clean, copyable client-side URLs such as `/pages/page-name` and `/journals/2026_07_18`, with browser back/forward navigation;
 - daily journals and safe page renaming with optional reference updates;
 - complete built-in documentation, always available with `?` or from the command palette.
 

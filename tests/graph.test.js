@@ -41,6 +41,16 @@ test('keeps fenced code nested after text inside a graph block', () => {
   assert.equal(Graph.serializeDocument(document), markdown);
 });
 
+test('keeps Org quote contents inside a single graph block', () => {
+  const markdown = '- #+BEGIN_QUOTE\n  quoted text\n  - quoted bullet\n  #+END_QUOTE\n- next block\n';
+  const document = Graph.parseDocument(markdown);
+
+  assert.equal(document.blocks.length, 2);
+  assert.equal(document.blocks[0].children.length, 0);
+  assert.match(document.blocks[0].content, /#\+BEGIN_QUOTE[\s\S]*quoted bullet[\s\S]*#\+END_QUOTE/);
+  assert.equal(Graph.serializeDocument(document), markdown);
+});
+
 test('indexes page and block references', () => {
   const pages = [
     { title: 'Source', path: 'pages/source.md', content: '- See [[Alias]] and ((12345678-abcd))\n' },

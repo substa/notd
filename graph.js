@@ -77,10 +77,11 @@
     const stack = [];
     let current = null;
     let inFence = false;
+    let inOrgQuote = false;
 
     lines.forEach((line, lineNumber) => {
       if (lineNumber === lines.length - 1 && !line && document.trailingNewline) return;
-      const bullet = !inFence && line.match(/^([ \t]*)([-+*])(?:\s(.*)|\s*)$/);
+      const bullet = !inFence && !inOrgQuote && line.match(/^([ \t]*)([-+*])(?:\s(.*)|\s*)$/);
       if (bullet) {
         let depth = Math.floor(indentationWidth(bullet[1]) / unit);
         depth = Math.min(depth, stack.length);
@@ -101,6 +102,7 @@
         stack[depth] = block;
         current = block;
         if (/^\s*(```|~~~)/.test(content)) inFence = true;
+        if (/^\s*#\+BEGIN_QUOTE\b/i.test(content)) inOrgQuote = true;
         return;
       }
 
@@ -113,6 +115,8 @@
       const continuation = line.startsWith(expected) ? line.slice(expected.length) : line.replace(/^\s{1,2}/, '');
       current.content += `\n${continuation}`;
       if (/^\s*(```|~~~)/.test(continuation)) inFence = !inFence;
+      if (/^\s*#\+BEGIN_QUOTE\b/i.test(continuation)) inOrgQuote = true;
+      if (/^\s*#\+END_QUOTE\s*$/i.test(continuation)) inOrgQuote = false;
     });
 
     while (document.preamble.length && document.preamble.at(-1) === '') document.preamble.pop();

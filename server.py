@@ -131,6 +131,17 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
+    def send_head(self):
+        """Serve the SPA shell for clean graph-page routes."""
+        original_path = self.path
+        route = urlparse(original_path).path
+        if re.match(r"^/(?:pages|journals)/[^/].*", route):
+            self.path = "/index.html"
+        try:
+            return super().send_head()
+        finally:
+            self.path = original_path
+
     def json_response(self, payload: object, status: int = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
