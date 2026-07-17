@@ -17,9 +17,22 @@
         <input id="fileName" value="Untitled" aria-label="Document name" spellcheck="false">
         <span id="dirtyDot" class="dirty-dot" aria-label="Unsaved changes"></span>
       </div>
-      <button class="command-button" id="commandButton" aria-label="Open commands" aria-keyshortcuts="Control+K Meta+K" title="Commands (⌘/Ctrl + K)">
-        <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
-      </button>
+      <div class="title-actions">
+        <button class="title-action" id="todayJournalButton" type="button" aria-label="Go to today's journal" title="Today's journal (⌘/Ctrl + Shift + J)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-7 8 7M6.5 9.5V20h11V9.5M10 20v-6h4v6"/></svg>
+        </button>
+        <button class="title-action" id="journalCalendarButton" type="button" aria-label="Open journal calendar" aria-expanded="false" aria-controls="journalCalendar" title="Open journal calendar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 9h16M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01"/></svg>
+        </button>
+        <div id="journalCalendar" class="journal-calendar" role="dialog" aria-label="Choose journal date" hidden>
+          <header><button type="button" data-calendar-move="-1" aria-label="Previous month">‹</button><strong id="calendarMonth"></strong><button type="button" data-calendar-move="1" aria-label="Next month">›</button></header>
+          <div class="calendar-weekdays" aria-hidden="true"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+          <div id="calendarDays" class="calendar-days"></div>
+        </div>
+        <button class="command-button" id="commandButton" aria-label="Search commands and pages" aria-keyshortcuts="Control+K Meta+K" title="Search (⌘/Ctrl + K)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg>
+        </button>
+      </div>
     </header>
 
     <main class="workspace">
@@ -56,25 +69,34 @@
 
     <div class="command-backdrop" id="commandPalette" hidden>
       <div class="command-palette" role="dialog" aria-modal="true" aria-label="Commands">
-        <div id="commandQuickActions" class="command-quick-actions" aria-label="File actions">
-          <button data-quick-command="new" aria-label="New document" title="New document (⌘/Ctrl + N)">
-            <svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M12 12v6M9 15h6"/></svg>
-          </button>
-          <button data-quick-command="open" aria-label="Open file" title="Open file (⌘/Ctrl + O)">
-            <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10l-2 10H5z"/></svg>
-          </button>
-          <button data-quick-command="save" aria-label="Save" title="Save (⌘/Ctrl + S)">
-            <svg viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg>
-          </button>
-          <button data-quick-command="export" aria-label="Export HTML" title="Export HTML (⌘/Ctrl + Shift + E)">
-            <svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M5 13v7h14v-7"/></svg>
-          </button>
-        </div>
         <div class="command-search">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
-          <input id="commandInput" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false" aria-label="Search commands">
+          <input id="commandInput" type="text" placeholder="Search commands and pages…" autocomplete="off" spellcheck="false" aria-label="Search commands, pages, and blocks">
         </div>
-        <div id="commandList" class="command-list" role="listbox"></div>
+        <section id="createPageSection" class="command-section command-section-create" aria-label="Create page" hidden>
+          <div id="createPageList" class="command-list" role="listbox"></div>
+        </section>
+        <section id="pageResultSection" class="command-section command-section-recent" data-command-section="pages" aria-labelledby="recentHeading">
+          <header class="command-section-header">
+            <h3 id="recentHeading" class="command-section-title">Recent pages</h3>
+            <button type="button" data-command-section-more="pages" tabindex="-1" aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown" title="Show more (Ctrl/Cmd + ↓)" hidden>show more</button>
+          </header>
+          <div id="recentPageList" class="command-list" role="listbox"></div>
+        </section>
+        <section id="commandResultSection" class="command-section command-section-main" data-command-section="commands" aria-labelledby="commandsHeading">
+          <header class="command-section-header">
+            <h3 id="commandsHeading" class="command-section-title">Commands</h3>
+            <button type="button" data-command-section-more="commands" tabindex="-1" aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown" title="Show more (Ctrl/Cmd + ↓)" hidden>show more</button>
+          </header>
+          <div id="commandList" class="command-list" role="listbox"></div>
+        </section>
+        <section id="blockResultSection" class="command-section command-section-blocks" data-command-section="blocks" aria-labelledby="blocksHeading" hidden>
+          <header class="command-section-header">
+            <h3 id="blocksHeading" class="command-section-title">Blocks</h3>
+            <button type="button" data-command-section-more="blocks" tabindex="-1" aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown" title="Show more (Ctrl/Cmd + ↓)" hidden>show more</button>
+          </header>
+          <div id="blockResultList" class="command-list" role="listbox"></div>
+        </section>
       </div>
     </div>
     <section id="documentationView" class="documentation-view" aria-label="Documentation" hidden>
@@ -87,7 +109,16 @@
       </div>
     </section>
     <div id="graphAutocomplete" class="graph-autocomplete" role="listbox" hidden></div>
-    <input id="journalDatePicker" class="journal-date-picker" type="date" aria-label="Journal date">
+    <div id="mobileBlockToolbar" class="mobile-block-toolbar" role="toolbar" aria-label="Block actions" hidden>
+      <button type="button" data-block-action="outdent" aria-label="Decrease indentation" title="Decrease indentation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6h9M11 12h9M11 18h9M8 9l-3 3 3 3"/></svg></button>
+      <button type="button" data-block-action="indent" aria-label="Increase indentation" title="Increase indentation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6h9M11 12h9M11 18h9M5 9l3 3-3 3"/></svg></button>
+      <button type="button" data-block-action="up" aria-label="Move block up" title="Move block up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M7 10l5-5 5 5"/></svg></button>
+      <button type="button" data-block-action="down" aria-label="Move block down" title="Move block down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M7 14l5 5 5-5"/></svg></button>
+      <button type="button" data-block-action="undo" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6"/></svg></button>
+      <button type="button" data-block-action="redo" aria-label="Redo" title="Redo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6"/></svg></button>
+      <button type="button" data-block-action="square" aria-label="Insert page reference brackets" title="Insert [[ ]]"><span aria-hidden="true">[]</span></button>
+      <button type="button" data-block-action="round" aria-label="Insert block reference parentheses" title="Insert (( ))"><span aria-hidden="true">()</span></button>
+    </div>
     <div id="toast" class="toast" role="status"></div>
     <input id="fileInput" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
   </div>

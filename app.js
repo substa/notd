@@ -12,9 +12,10 @@
   const references = $('#references');
   const graphName = $('#graphName');
   const graphAutocomplete = $('#graphAutocomplete');
+  const mobileBlockToolbar = $('#mobileBlockToolbar');
   const documentationView = $('#documentationView');
   const documentationContent = $('#documentationContent');
-  const journalDatePicker = $('#journalDatePicker');
+  const journalCalendar = $('#journalCalendar');
   const fileName = $('#fileName');
   const fileInput = $('#fileInput');
   const saveState = $('#saveState');
@@ -40,7 +41,11 @@
   let activeSourceBlock = null;
   let paletteContext = null;
   let filteredCommands = [];
+  let expandedCommandSections = new Set();
   let selectedCommand = 0;
+  let calendarViewDate = new Date();
+  let calendarFocusDate = new Date();
+  let calendarSelectAction = null;
   let vimPending = '';
   let vimDesiredColumn = null;
   let vimInsertSnapshot = null;
@@ -58,7 +63,7 @@ Select a block to view and edit its Markdown source. When you move to another bl
 
 ## Quick commands
 
-In Vim mode, press **/** to open commands; while typing, use it at the start of an empty line. You can also use **⌘/Ctrl + K** or **⌘/Ctrl + Shift + P** anywhere. Type a command name, move with the arrow keys, and press Enter.
+Use **⌘/Ctrl + K** or **⌘/Ctrl + Shift + P** to open the command palette. Inside a graph block, type **/** for inline commands such as journals and date references. Type a command name, move with the arrow keys, and press Enter.
 
 ## Vim mode
 
@@ -372,7 +377,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function renderGraphPage() {
     if (!state.graphMode || !state.graphDocument) return;
-    activeGraphBlock = null;
+    activeGraphBlock = null; mobileBlockToolbar.hidden = true;
     const renderBlocks = (blocks, page = state.graphPage) => {
       const fragment = document.createDocumentFragment();
       for (const block of blocks) {
@@ -442,7 +447,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!activeGraphBlock) return;
     const { block, field, page } = activeGraphBlock;
     if (state.vimEnabled && state.vimMode === 'insert') finishVimInsertChange(field);
-    activeGraphBlock = null;
+    activeGraphBlock = null; mobileBlockToolbar.hidden = true;
     if (state.vimEnabled) { state.vimMode = 'normal'; vimPending = ''; vimDesiredColumn = null; updateVimUi(); }
     hideGraphAutocomplete();
     if (field.isConnected) field.replaceWith(graphContentElement(block, page));
@@ -457,13 +462,20 @@ Open, save, export, and reach recent documents or headings from the command pale
     const field = document.createElement('textarea');
     field.className = 'graph-block-editor'; field.spellcheck = true; field.value = block.content;
     field.dataset.blockId = block.id;
+    field.addEventListener('beforeinput', event => {
+      if (matchMedia('(max-width:720px)').matches && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
+    });
     field.addEventListener('input', handleGraphBlockInput);
     field.addEventListener('keydown', handleGraphBlockKeydown);
+    field.addEventListener('keyup', event => {
+      if (event.key.length === 1 || ['Backspace', 'Delete'].includes(event.key)) showGraphAutocomplete(field);
+    });
+    field.addEventListener('compositionend', () => showGraphAutocomplete(field));
     field.addEventListener('blur', () => setTimeout(() => {
-      if (activeGraphBlock?.field === field && $('#commandPalette').hidden && !graphAutocomplete.contains(document.activeElement)) commitGraphBlock();
+      if (activeGraphBlock?.field === field && $('#commandPalette').hidden && !graphAutocomplete.contains(document.activeElement) && !journalCalendar.contains(document.activeElement) && !mobileBlockToolbar.contains(document.activeElement)) commitGraphBlock();
     }));
     field.dataset.pagePath = page?.path || '';
-    content.replaceWith(field); activeGraphBlock = { block, field, page }; resizeGraphEditor(field);
+    content.replaceWith(field); activeGraphBlock = { block, field, page }; mobileBlockToolbar.hidden = false; resizeGraphEditor(field);
     const caret = position === null ? field.value.length : Math.max(0, Math.min(position, field.value.length));
     field.focus({ preventScroll: true }); field.setSelectionRange(caret, caret);
     if (state.vimEnabled) setVimMode(state.vimMode, field, caret);
@@ -560,6 +572,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     graphHistory = graphHistory.slice(0, graphHistoryIndex + 1); graphHistory.push(entry); graphHistoryIndex = graphHistory.length - 1;
   }
 
+  function rememberGraphPage(page) {
+    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const item = { graph: graphStore?.name || '', path: page.path, title: page.title };
+    const recentGraphPages = [item, ...(settings.recentGraphPages || []).filter(recent => recent.graph !== item.graph || recent.path !== item.path)].slice(0, 20);
+    saveSettings({ lastGraphPage: page.title, recentGraphPages });
+  }
+
   async function navigateGraphHistory(direction) {
     if (!state.graphMode) return;
     updateCurrentHistoryPosition();
@@ -597,7 +616,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     app.classList.add('graph-mode'); app.classList.toggle('journal-mode', state.journalMode); app.classList.toggle('dirty', Boolean(draft));
     graphName.hidden = false; graphName.textContent = graphStore.name; updateVimUi();
     fileName.value = page.title; fileName.readOnly = Boolean(page.journal); document.title = `${page.title} — ${graphStore.name} — markd`;
-    saveSettings({ lastGraphPage: page.title });
+    rememberGraphPage(page);
     renderGraphPage(); updateStats();
     saveState.textContent = draftConflict ? 'Recovery conflict' : (draft ? 'Recovered draft' : 'Ready');
     requestAnimationFrame(() => {
@@ -641,10 +660,66 @@ Open, save, export, and reach recent documents or headings from the command pale
     const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + days); return date;
   }
 
-  function openJournalDatePicker() {
-    journalDatePicker.value = MarkdGraph.journalInfo(new Date(), graphStore?.config).date;
-    try { if (journalDatePicker.showPicker) journalDatePicker.showPicker(); else journalDatePicker.click(); }
-    catch { journalDatePicker.click(); }
+  async function openSingleJournalDate(date) {
+    if (!graphStore) await openGraph();
+    if (!graphStore) return;
+    const journal = MarkdGraph.journalInfo(date, graphStore.config);
+    let page = graphStore.pages.find(item => item.journalDate === journal.date) || graphIndex.resolvePage(journal.title);
+    if (!page) {
+      page = await graphStore.createPage(journal.title, { journal: true, journalDate: journal.value, filename: journal.filename });
+      graphIndex.rebuild(graphStore.pages);
+    }
+    await loadGraphPage(page, { journalMode: false });
+    markdWrap.scrollTop = 0;
+  }
+
+  function renderJournalCalendar() {
+    const year = calendarViewDate.getFullYear(); const month = calendarViewDate.getMonth();
+    $('#calendarMonth').textContent = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(calendarViewDate);
+    const first = new Date(year, month, 1, 12); const offset = (first.getDay() + 6) % 7;
+    const start = new Date(year, month, 1 - offset, 12);
+    const today = MarkdGraph.journalInfo(new Date(), graphStore?.config).date;
+    const current = state.graphPage?.journalDate;
+    const focused = MarkdGraph.journalInfo(calendarFocusDate, graphStore?.config).date;
+    $('#calendarDays').innerHTML = Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(start); date.setDate(start.getDate() + index);
+      const value = MarkdGraph.journalInfo(date, graphStore?.config).date;
+      const classes = [date.getMonth() !== month ? 'outside' : '', value === today ? 'today' : '', value === current ? 'current' : ''].filter(Boolean).join(' ');
+      return `<button type="button" class="${classes}" data-calendar-date="${value}" tabindex="${value === focused ? '0' : '-1'}" aria-label="${escapeHtml(date.toLocaleDateString(undefined, { dateStyle: 'full' }))}">${date.getDate()}</button>`;
+    }).join('');
+  }
+
+  function focusCalendarDate(date) {
+    calendarFocusDate = new Date(date); calendarFocusDate.setHours(12, 0, 0, 0);
+    calendarViewDate = new Date(calendarFocusDate.getFullYear(), calendarFocusDate.getMonth(), 1, 12);
+    renderJournalCalendar();
+    requestAnimationFrame(() => $('#calendarDays [tabindex="0"]')?.focus());
+  }
+
+  function moveCalendarMonth(months) {
+    const day = calendarFocusDate.getDate();
+    const target = new Date(calendarFocusDate.getFullYear(), calendarFocusDate.getMonth() + months, 1, 12);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0, 12).getDate();
+    target.setDate(Math.min(day, lastDay)); focusCalendarDate(target);
+  }
+
+  function toggleJournalCalendar(selectAction = null, anchor = null) {
+    const opening = journalCalendar.hidden || selectAction;
+    journalCalendar.hidden = !opening; $('#journalCalendarButton').setAttribute('aria-expanded', String(opening));
+    if (opening) {
+      calendarSelectAction = selectAction; calendarFocusDate = new Date(); calendarFocusDate.setHours(12, 0, 0, 0);
+      calendarViewDate = new Date(calendarFocusDate); calendarViewDate.setDate(1);
+      journalCalendar.classList.toggle('inline', Boolean(anchor));
+      journalCalendar.style.left = anchor ? `${Math.min(innerWidth - 250, Math.max(8, anchor.left))}px` : '';
+      journalCalendar.style.top = anchor ? `${Math.min(innerHeight - 280, anchor.bottom + 4)}px` : '';
+      renderJournalCalendar();
+      requestAnimationFrame(() => $('#calendarDays [tabindex="0"]')?.focus());
+    }
+  }
+
+  function closeJournalCalendar() {
+    journalCalendar.hidden = true; journalCalendar.classList.remove('inline'); journalCalendar.style.left = ''; journalCalendar.style.top = '';
+    calendarSelectAction = null; $('#journalCalendarButton').setAttribute('aria-expanded', 'false');
   }
 
   async function openToday(reset = false) {
@@ -703,22 +778,22 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function moveGraphBlock(block, direction) {
-    const location = graphBlockLocation(block.id); if (!location) return;
-    const target = location.index + direction; if (target < 0 || target >= location.blocks.length) return;
-    location.blocks.splice(location.index, 1); location.blocks.splice(target, 0, block); graphMutationFocus(block);
+    const location = graphBlockLocation(block.id); if (!location) return false;
+    const target = location.index + direction; if (target < 0 || target >= location.blocks.length) return false;
+    location.blocks.splice(location.index, 1); location.blocks.splice(target, 0, block); graphMutationFocus(block); return true;
   }
 
   function indentGraphBlock(block, outdent = false) {
-    const location = graphBlockLocation(block.id); if (!location) return;
+    const location = graphBlockLocation(block.id); if (!location) return false;
     if (!outdent) {
-      const previous = location.blocks[location.index - 1]; if (!previous) return;
+      const previous = location.blocks[location.index - 1]; if (!previous) return false;
       location.blocks.splice(location.index, 1); previous.children.push(block); previous.collapsed = false;
     } else {
-      if (!location.parent) return;
-      const parentLocation = graphBlockLocation(location.parent.id); if (!parentLocation) return;
+      if (!location.parent) return false;
+      const parentLocation = graphBlockLocation(location.parent.id); if (!parentLocation) return false;
       location.blocks.splice(location.index, 1); parentLocation.blocks.splice(parentLocation.index + 1, 0, block);
     }
-    graphMutationFocus(block);
+    graphMutationFocus(block); return true;
   }
 
   function toggleGraphTask(block, focus = true) {
@@ -740,10 +815,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
     const block = location.block;
     if (handleWikiPair(event)) return;
-    if (event.key === '/' && !event.metaKey && !event.ctrlKey && field.value.slice(0, field.selectionStart).split('\n').pop().trim() === '') {
-      event.preventDefault(); showCommandPalette('/'); return;
-    }
-    if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+    if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
       event.preventDefault(); handleGraphAutocompleteKey(event.key); return;
     }
     if (event.key === 'Tab') { event.preventDefault(); indentGraphBlock(block, event.shiftKey); return; }
@@ -767,35 +839,112 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   let autocompleteItems = []; let autocompleteIndex = 0;
+  const slashCommands = [
+    { title: '/today', keywords: 'journal current date', days: 0 },
+    { title: '/yesterday', keywords: 'journal previous date', days: -1 },
+    { title: '/tomorrow', keywords: 'journal next date', days: 1 },
+    { title: '/date picker', keywords: 'journal calendar choose date', datePicker: true }
+  ];
+  function blockAutocompleteResults(query) {
+    if (!graphIndex) return [];
+    const needle = MarkdGraph.normalizePage(query); const results = [];
+    for (const page of graphIndex.allPages()) {
+      const current = page.path === state.graphPage?.path;
+      const document = current ? state.graphDocument : graphIndex.documents.get(MarkdGraph.normalizePage(page.title));
+      for (const { block } of MarkdGraph.flattenBlocks(document?.blocks)) {
+        if (current && block === activeGraphBlock?.block) continue;
+        const content = block.content.replace(/^\s*[\w-]+::.*$/gm, '').replace(/\[\[|\]\]|\(\(|\)\)/g, '').trim();
+        if (!content || (needle && !MarkdGraph.normalizePage(content).includes(needle))) continue;
+        results.push({ title: content.slice(0, 80), blockAutocomplete: true, block, page, document });
+        if (results.length >= 12) return results;
+      }
+    }
+    return results;
+  }
   function showGraphAutocomplete(field) {
-    const before = field.value.slice(0, field.selectionStart); const match = before.match(/\[\[([^\]]*)$/);
-    if (!match || !graphIndex) return hideGraphAutocomplete();
-    const title = match[1].trim(); const query = MarkdGraph.normalizePage(title);
-    const pages = graphIndex.allPages();
-    const matches = pages.filter(page => !query || MarkdGraph.normalizePage(page.title).includes(query)).slice(0, 12);
-    const exactMatch = query && pages.some(page => MarkdGraph.normalizePage(page.title) === query);
-    autocompleteItems = title && !exactMatch ? [{ title, create: true }, ...matches].slice(0, 12) : matches;
+    const before = field.value.slice(0, field.selectionStart); const wikiMatch = before.match(/\[\[([^\]]*)$/);
+    const blockMatch = before.match(/\(\(([^)]*)$/); const slashMatch = before.match(/\/([^/\n]*)$/);
+    if (slashMatch) {
+      const query = slashMatch[1].trim().toLowerCase(); const typedCommand = `/${query}`;
+      autocompleteItems = slashCommands.filter(command => command.title.startsWith(typedCommand)).map(command => ({ ...command, slash: true }));
+    } else if (wikiMatch && graphIndex) {
+      const title = wikiMatch[1].trim(); const query = MarkdGraph.normalizePage(title);
+      const pages = graphIndex.allPages();
+      const matches = pages.filter(page => !query || MarkdGraph.normalizePage(page.title).includes(query)).slice(0, 12);
+      const exactMatch = query && pages.some(page => MarkdGraph.normalizePage(page.title) === query);
+      autocompleteItems = title && !exactMatch ? [{ title, create: true }, ...matches].slice(0, 12) : matches;
+    } else if (blockMatch) autocompleteItems = blockAutocompleteResults(blockMatch[1].trim());
+    else return hideGraphAutocomplete();
     if (!autocompleteItems.length) return hideGraphAutocomplete();
     autocompleteIndex = 0;
-    graphAutocomplete.innerHTML = autocompleteItems.map((page, index) => `<button type="button" data-autocomplete-index="${index}" class="${index === 0 ? 'selected' : ''}">${page.create ? `<span class="autocomplete-create">Create page</span>${escapeHtml(page.title)}` : escapeHtml(page.title)}</button>`).join('');
-    const rect = field.getBoundingClientRect(); graphAutocomplete.style.left = `${Math.min(innerWidth - 312, Math.max(12, rect.left + 20))}px`; graphAutocomplete.style.top = `${Math.min(innerHeight - 230, rect.bottom + 4)}px`; graphAutocomplete.hidden = false;
+    graphAutocomplete.innerHTML = autocompleteItems.map((item, index) => `<button type="button" data-autocomplete-index="${index}" class="${index === 0 ? 'selected' : ''}">${item.create ? `<span class="autocomplete-create">Create page</span>` : item.slash ? `<span class="autocomplete-create">Command</span>` : item.blockAutocomplete ? `<span class="autocomplete-create">Block · ${escapeHtml(item.page.title)}</span>` : ''}${escapeHtml(item.title)}</button>`).join('');
+    graphAutocomplete.hidden = false;
+    const rect = field.getBoundingClientRect(); const viewport = window.visualViewport;
+    const viewportTop = viewport?.offsetTop || 0; const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportRight = viewportLeft + (viewport?.width || innerWidth); const viewportBottom = viewportTop + (viewport?.height || innerHeight);
+    const toolbarTop = !mobileBlockToolbar.hidden ? mobileBlockToolbar.getBoundingClientRect().top - 6 : viewportBottom - 8;
+    const availableBottom = Math.min(viewportBottom - 8, toolbarTop); const below = rect.bottom + 4;
+    graphAutocomplete.style.maxHeight = '220px';
+    const popupHeight = graphAutocomplete.offsetHeight; const belowSpace = Math.max(0, availableBottom - below); const aboveSpace = Math.max(0, rect.top - viewportTop - 12);
+    let top;
+    if (popupHeight <= belowSpace) top = below;
+    else if (popupHeight <= aboveSpace) top = rect.top - popupHeight - 4;
+    else if (belowSpace >= aboveSpace) { graphAutocomplete.style.maxHeight = `${belowSpace}px`; top = below; }
+    else { graphAutocomplete.style.maxHeight = `${aboveSpace}px`; top = rect.top - graphAutocomplete.offsetHeight - 4; }
+    graphAutocomplete.style.left = `${Math.min(viewportRight - graphAutocomplete.offsetWidth - 12, Math.max(viewportLeft + 12, rect.left + 20))}px`;
+    graphAutocomplete.style.top = `${top}px`;
   }
   function hideGraphAutocomplete() { graphAutocomplete.hidden = true; autocompleteItems = []; }
   function renderAutocompleteSelection() { $$('[data-autocomplete-index]', graphAutocomplete).forEach((item, index) => item.classList.toggle('selected', index === autocompleteIndex)); }
   function chooseGraphAutocomplete(index = autocompleteIndex, advance = false) {
-    const page = autocompleteItems[index]; const field = activeGraphBlock?.field; const block = activeGraphBlock?.block;
-    if (!page || !field || !block) return;
-    const before = field.value.slice(0, field.selectionStart); const start = before.lastIndexOf('[[');
-    const closingLength = field.value.slice(field.selectionStart).startsWith(']]') ? 2 : 0;
-    field.setRangeText(`[[${page.title}]]`, start, field.selectionStart + closingLength, 'end'); field.dispatchEvent(new InputEvent('input', { bubbles: true })); hideGraphAutocomplete(); field.focus();
-    if (page.create) graphStore.createPage(page.title).then(() => {
-      graphIndex.rebuild(graphStore.pages); toast(`Page “${page.title}” created`);
+    const item = autocompleteItems[index]; const field = activeGraphBlock?.field; const block = activeGraphBlock?.block;
+    if (!item || !field || !block) return;
+    const before = field.value.slice(0, field.selectionStart);
+    if (item.blockAutocomplete) {
+      const start = before.lastIndexOf('(('); const end = field.selectionStart;
+      let uuid = MarkdGraph.propertiesFrom(item.block.content).id;
+      if (!uuid) {
+        uuid = MarkdGraph.newId(); item.block.uuid = uuid;
+        item.block.content = `${item.block.content.replace(/\s+$/, '')}${item.block.content.trim() ? '\n' : ''}id:: ${uuid}`;
+        if (item.page.path === state.graphPage?.path) graphChanged();
+        else {
+          const content = MarkdGraph.serializeDocument(item.document);
+          graphStore.writePage(item.page, content).then(() => graphIndex.updatePage(item.page, content)).catch(error => toast(error.message || 'Could not create the block reference'));
+        }
+      }
+      const closingLength = field.value.slice(end).startsWith('))') ? 2 : 0;
+      field.setRangeText(`((${uuid}))`, start, end + closingLength, 'end');
+      field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' })); hideGraphAutocomplete(); field.focus();
+      return;
+    }
+    if (item.slash) {
+      const start = before.lastIndexOf('/'); const end = field.selectionStart;
+      if (item.datePicker) {
+        const anchor = graphAutocomplete.getBoundingClientRect(); hideGraphAutocomplete();
+        toggleJournalCalendar(date => {
+          const title = MarkdGraph.journalInfo(date, graphStore?.config).title; const reference = `[[${title}]]`;
+          if (field.isConnected) {
+            field.setRangeText(reference, start, end, 'end'); field.dispatchEvent(new InputEvent('input', { bubbles: true })); field.focus();
+          } else {
+            block.content = `${block.content.slice(0, start)}${reference}${block.content.slice(end)}`; graphChanged(); focusGraphBlock(block.id, start + reference.length);
+          }
+        }, anchor);
+      } else {
+        const date = relativeJournalDate(item.days); const title = MarkdGraph.journalInfo(date, graphStore?.config).title;
+        field.setRangeText(`[[${title}]]`, start, end, 'end'); field.dispatchEvent(new InputEvent('input', { bubbles: true })); hideGraphAutocomplete(); field.focus();
+      }
+      return;
+    }
+    const start = before.lastIndexOf('[['); const closingLength = field.value.slice(field.selectionStart).startsWith(']]') ? 2 : 0;
+    field.setRangeText(`[[${item.title}]]`, start, field.selectionStart + closingLength, 'end'); field.dispatchEvent(new InputEvent('input', { bubbles: true })); hideGraphAutocomplete(); field.focus();
+    if (item.create) graphStore.createPage(item.title).then(() => {
+      graphIndex.rebuild(graphStore.pages); toast(`Page “${item.title}” created`);
     }).catch(error => toast(error.message || 'Could not create the page'));
     if (advance) createNextGraphBlock(block);
   }
   function handleGraphAutocompleteKey(key) {
     if (key === 'Escape') return hideGraphAutocomplete();
-    if (key === 'Enter') return chooseGraphAutocomplete(autocompleteIndex, true);
+    if (key === 'Enter' || key === 'Tab') return chooseGraphAutocomplete(autocompleteIndex, key === 'Enter');
     autocompleteIndex = (autocompleteIndex + (key === 'ArrowDown' ? 1 : -1) + autocompleteItems.length) % autocompleteItems.length; renderAutocompleteSelection();
   }
 
@@ -1252,7 +1401,6 @@ Open, save, export, and reach recent documents or headings from the command pale
       replaceVimRange(field, position, bounds.end, '', key !== 'C');
       if (key === 'C') setVimMode('insert', field, position); else showVimCursor(field, position);
     } else if (key === 'r') { vimPending = 'r'; updateVimUi(); }
-    else if (key === '/') showCommandPalette();
     else if (key === ':') showCommandPalette();
     else if (key === '?') showDocumentation();
   }
@@ -1298,9 +1446,6 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault(); event.stopPropagation(); moveToAdjacentBlock(1, true); return;
-    }
-    if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && source.value.slice(0, start).split('\n').pop().trim() === '') {
-      event.preventDefault(); event.stopPropagation(); showCommandPalette('/'); return;
     }
     if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey) return;
     const currentLine = source.value.slice(0, start).split('\n').pop();
@@ -1363,7 +1508,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     outliner.hidden = true; graphName.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
     app.classList.remove('graph-mode', 'journal-mode', 'source-mode'); updateVimUi();
     state.markdown = markdown;
-    activeSourceBlock = null; activeGraphBlock = null;
+    activeSourceBlock = null; activeGraphBlock = null; mobileBlockToolbar.hidden = true;
     vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null;
     state.fileHandle = options.handle || null;
     state.currentId = options.id || crypto.randomUUID?.() || String(Date.now());
@@ -1786,12 +1931,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     { label: 'Documentation', shortcut: '?', keywords: 'help guide manual shortcuts', run: showDocumentation },
     { label: 'Open local graph', keywords: 'folder logseq graph local', run: () => requestAction(openGraph) },
     { label: 'New graph page', keywords: 'page create graph', run: () => requestAction(createGraphPage) },
-    { label: 'Today journal', shortcut: '⇧⌘ J', keywords: 'daily notes journal today', run: () => requestAction(openToday) },
+    { label: 'Today journal', shortcut: '⇧⌘ J', keywords: 'daily notes journal today', aliases: '/today', run: () => requestAction(openToday) },
     { label: 'Previous page', shortcut: 'Alt ←', keywords: 'history back navigate', run: () => navigateGraphHistory(-1) },
     { label: 'Next page', shortcut: 'Alt →', keywords: 'history forward navigate', run: () => navigateGraphHistory(1) },
-    { label: '/yesterday', keywords: 'journal previous day', run: () => requestAction(() => openJournalDate(relativeJournalDate(-1))) },
-    { label: '/tomorrow', keywords: 'journal next day', run: () => requestAction(() => openJournalDate(relativeJournalDate(1))) },
-    { label: '/date picker', keywords: 'journal calendar choose select date', run: openJournalDatePicker },
     { label: 'Copy block reference', keywords: 'uuid block reference link', run: copyGraphBlockReference },
     { label: 'Zoom into block', keywords: 'focus block outliner', run: zoomGraphBlock },
     { label: 'Close graph', keywords: 'close folder graph', run: closeGraph },
@@ -1831,56 +1973,105 @@ Open, save, export, and reach recent documents or headings from the command pale
     heading?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  function contextualCommands(query) {
+  function contextualCommands() {
     const markdown = currentMarkdown();
-    const recentCommands = getStoredDocs().map(doc => ({
-      label: `Recent: ${doc.name}`,
-      shortcut: relativeDate(doc.updated),
-      keywords: 'recent files documents open',
-      run: () => requestAction(() => loadMarkdown(doc.markdown, doc.name, { id: doc.id }))
-    }));
-    const headingCommands = [...markdown.matchAll(/^(#{1,6})\s+(.+)$/gm)].map((match, index) => ({
+    return [...markdown.matchAll(/^(#{1,6})\s+(.+)$/gm)].map((match, index) => ({
       label: `Outline: ${match[2].replace(/[*_`]/g, '')}`,
       shortcut: `H${match[1].length}`,
       keywords: 'outline title heading section',
       run: () => goToHeading(index, markdown.slice(0, match.index).split('\n').length)
     }));
-    const removeCommands = query.includes('remove') ? getStoredDocs().map(doc => ({
-      label: `Remove recent: ${doc.name}`,
-      keywords: 'remove delete recent',
-      run: () => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(getStoredDocs().filter(item => item.id !== doc.id)));
-        toast('Document removed from recent files');
-      }
-    })) : [];
-    const graphPages = graphIndex ? graphIndex.allPages()
-      .filter(page => !query || MarkdGraph.normalizePage(page.title).includes(MarkdGraph.normalizePage(query)))
-      .slice(0, 80).map(page => ({
-        label: `Page: ${page.title}`, shortcut: page.journal ? 'Journal' : '', keywords: `graph page ${page.title}`,
-        run: () => loadGraphPage(page)
-      })) : [];
-    const graphResults = graphIndex && query.length >= 2 ? graphIndex.search(query, 24).map(result => ({
-      label: `Block: ${result.content.replace(/^\s*[\w-]+::.*$/gm, '').replace(/\[\[|\]\]/g, '').trim().slice(0, 80)}`,
-      shortcut: result.page.title, keywords: `graph search ${result.content}`,
+  }
+
+  function blockResultCommands(query) {
+    if (!graphIndex || query.length < 2) return [];
+    return graphIndex.search(query, 24).map(result => ({
+      label: result.content.replace(/^\s*[\w-]+::.*$/gm, '').replace(/\[\[|\]\]/g, '').trim().slice(0, 80),
+      shortcut: result.page.title,
       run: () => loadGraphPage(result.page, { blockId: result.block.id })
-    })) : [];
-    return [...graphPages, ...graphResults, ...recentCommands, ...headingCommands, ...removeCommands];
+    }));
+  }
+
+  function recentPageCommands(query) {
+    const searchQuery = query.toLowerCase();
+    const normalizedQuery = query && MarkdGraph.normalizePage(query);
+    const seen = new Set();
+    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const storedPages = (settings.recentGraphPages || []).filter(item => item.graph === graphStore?.name)
+      .map(item => graphStore?.pages.find(page => page.path === item.path)).filter(Boolean);
+    let graphPages = [...graphHistory].reverse().map(entry => graphStore?.pages.find(page => page.path === entry.path)).filter(Boolean);
+    graphPages.push(...storedPages);
+    if (query && graphIndex) graphPages.push(...graphIndex.allPages());
+    graphPages = graphPages.filter(page => {
+      if (seen.has(page.path)) return false;
+      seen.add(page.path);
+      return !normalizedQuery || MarkdGraph.normalizePage(page.title).includes(normalizedQuery);
+    }).slice(0, 80);
+    const pages = graphPages.map(page => ({
+      label: page.title, shortcut: page.journal ? 'Journal' : '', keywords: `graph page ${page.title}`,
+      run: () => loadGraphPage(page)
+    }));
+    const documents = getStoredDocs().filter(doc => !query || doc.name.toLowerCase().includes(searchQuery)).map(doc => ({
+      label: doc.name, shortcut: relativeDate(doc.updated), keywords: 'recent files documents open',
+      run: () => requestAction(() => loadMarkdown(doc.markdown, doc.name, { id: doc.id }))
+    }));
+    const exactPage = graphIndex?.allPages().some(page => MarkdGraph.normalizePage(page.title) === normalizedQuery);
+    const createPage = query && graphStore && !exactPage ? [{
+      label: `Create page “${query}”`, shortcut: 'Enter', createPage: true,
+      run: () => requestAction(() => loadGraphPage(query, { create: true }))
+    }] : [];
+    return [...createPage, ...pages, ...documents];
+  }
+
+  function commandMarkup(command, index) {
+    return `<button class="command-item${index === selectedCommand ? ' selected' : ''}" data-command-index="${index}" role="option" aria-selected="${index === selectedCommand}"><span>${escapeHtml(command.label)}</span>${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ''}</button>`;
   }
 
   function renderCommandList() {
-    const query = $('#commandInput').value.trim().toLowerCase();
-    filteredCommands = [...commands, ...contextualCommands(query)].filter(command => `${command.label} ${command.keywords || ''}`.toLowerCase().includes(query));
+    const rawQuery = $('#commandInput').value.trim(); const query = rawQuery.toLowerCase(); const searching = Boolean(query);
+    const commandQuery = query.replace(/^\/+/, ''); const slashQuery = query.startsWith('/');
+    const commandItems = [...commands, ...contextualCommands()].filter(command => slashQuery
+      ? (command.aliases || '').toLowerCase().split(/\s+/).some(alias => alias.startsWith(query))
+      : `${command.label} ${command.keywords || ''}`.toLowerCase().includes(commandQuery));
+    const blockItems = slashQuery ? [] : blockResultCommands(query);
+    const allPageItems = slashQuery ? [] : recentPageCommands(rawQuery);
+    const createItems = allPageItems.filter(command => command.createPage);
+    const pageItems = allPageItems.filter(command => !command.createPage);
+    const visibleItems = (items, section) => expandedCommandSections.has(section) ? items : items.slice(0, 5);
+    const visiblePageItems = visibleItems(pageItems, 'pages');
+    const visibleCommandItems = visibleItems(commandItems, 'commands');
+    const visibleBlockItems = visibleItems(blockItems, 'blocks');
+    filteredCommands = searching
+      ? [...createItems, ...visiblePageItems, ...visibleCommandItems, ...visibleBlockItems]
+      : [...visibleCommandItems, ...visiblePageItems];
     selectedCommand = Math.max(0, Math.min(selectedCommand, filteredCommands.length - 1));
-    $('#commandList').innerHTML = filteredCommands.length ? filteredCommands.map((command, index) =>
-      `<button class="command-item${index === selectedCommand ? ' selected' : ''}" data-command-index="${index}" role="option" aria-selected="${index === selectedCommand}"><span>${escapeHtml(command.label)}</span>${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ''}</button>`
-    ).join('') : '<div class="command-empty">No commands found</div>';
+    $('.command-palette').classList.toggle('searching', searching);
+    $('#createPageSection').hidden = !createItems.length;
+    $('#pageResultSection').hidden = !pageItems.length;
+    $('#commandResultSection').hidden = !commandItems.length;
+    $('#blockResultSection').hidden = !blockItems.length;
+    $('#recentHeading').textContent = searching ? 'Pages' : 'Recent pages';
+    const createOffset = 0;
+    const pageOffset = searching ? createItems.length : visibleCommandItems.length;
+    const commandOffset = searching ? createItems.length + visiblePageItems.length : 0;
+    const blockOffset = commandOffset + visibleCommandItems.length;
+    $('#createPageList').innerHTML = createItems.map((command, index) => commandMarkup(command, createOffset + index)).join('');
+    $('#recentPageList').innerHTML = visiblePageItems.map((command, index) => commandMarkup(command, pageOffset + index)).join('');
+    $('#commandList').innerHTML = visibleCommandItems.map((command, index) => commandMarkup(command, commandOffset + index)).join('');
+    $('#blockResultList').innerHTML = visibleBlockItems.map((command, index) => commandMarkup(command, blockOffset + index)).join('');
+    $$('[data-command-section-more]').forEach(button => {
+      const counts = { pages: pageItems.length, commands: commandItems.length, blocks: blockItems.length };
+      button.hidden = counts[button.dataset.commandSectionMore] <= 5 || expandedCommandSections.has(button.dataset.commandSectionMore);
+    });
+    $('.command-palette').classList.toggle('has-expanded-section', expandedCommandSections.size > 0);
+    $$('[data-command-section]').forEach(section => section.classList.toggle('expanded', expandedCommandSections.has(section.dataset.commandSection)));
     $('.command-item.selected')?.scrollIntoView({ block: 'nearest' });
   }
 
   function showCommandPalette(initialQuery = '') {
     const field = activeMarkdownField();
     paletteContext = field ? { field, start: field.selectionStart, end: field.selectionEnd } : null;
-    $('#commandPalette').hidden = false; $('#commandInput').value = initialQuery; selectedCommand = 0; renderCommandList();
+    $('#commandPalette').hidden = false; $('#commandInput').value = initialQuery; selectedCommand = 0; expandedCommandSections.clear(); renderCommandList();
     requestAnimationFrame(() => $('#commandInput').focus());
   }
 
@@ -1945,25 +2136,58 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   // UI events
+  mobileBlockToolbar.addEventListener('pointerdown', event => event.preventDefault());
+  mobileBlockToolbar.addEventListener('click', event => {
+    const button = event.target.closest('[data-block-action]');
+    const field = activeGraphBlock?.field; const block = activeGraphBlock?.block;
+    if (!button || !field || !block) return;
+    const action = button.dataset.blockAction;
+    if (action === 'undo' || action === 'redo') { applyVimHistory(action === 'redo'); return; }
+    const snapshot = captureVimSnapshot(field);
+    if (['indent', 'outdent', 'up', 'down'].includes(action)) {
+      const changed = action === 'indent' ? indentGraphBlock(block) : action === 'outdent' ? indentGraphBlock(block, true) : moveGraphBlock(block, action === 'up' ? -1 : 1);
+      if (changed) { pushVimSnapshot(vimUndoStack, snapshot); vimRedoStack.length = 0; }
+      return;
+    }
+    const brackets = action === 'square' ? ['[[', ']]'] : action === 'round' ? ['((', '))'] : null;
+    if (!brackets) return;
+    const start = field.selectionStart; const end = field.selectionEnd; const selected = field.value.slice(start, end);
+    field.setRangeText(`${brackets[0]}${selected}${brackets[1]}`, start, end, 'end');
+    const cursor = start + brackets[0].length; field.setSelectionRange(cursor, cursor);
+    pushVimSnapshot(vimUndoStack, snapshot); vimRedoStack.length = 0; notifyMarkdownField(field);
+  });
   document.addEventListener('pointerdown', event => {
     if (activeSourceBlock && !editor.contains(event.target) && !$('#commandPalette').contains(event.target)) commitActiveBlock();
-    if (activeGraphBlock && !outliner.contains(event.target) && !$('#commandPalette').contains(event.target) && !graphAutocomplete.contains(event.target)) commitGraphBlock();
+    if (activeGraphBlock && !outliner.contains(event.target) && !$('#commandPalette').contains(event.target) && !graphAutocomplete.contains(event.target) && !journalCalendar.contains(event.target) && !mobileBlockToolbar.contains(event.target)) commitGraphBlock();
   }, true);
   editor.addEventListener('focusout', () => setTimeout(() => {
     if (activeSourceBlock && $('#commandPalette').hidden && !editor.contains(document.activeElement)) commitActiveBlock();
   }));
-  const quickCommands = {
-    new: () => requestAction(newDocument),
-    open: () => requestAction(openFile),
-    save: saveFile,
-    export: exportHtml
-  };
-  $('#commandQuickActions').addEventListener('click', event => {
-    const button = event.target.closest('[data-quick-command]');
-    const command = button && quickCommands[button.dataset.quickCommand];
-    if (!command) return;
-    closeCommandPalette(false); command(); paletteContext = null;
+  $('#todayJournalButton').addEventListener('click', () => { closeJournalCalendar(); requestAction(() => openToday(true)); });
+  $('#journalCalendarButton').addEventListener('click', event => { event.stopPropagation(); toggleJournalCalendar(); });
+  journalCalendar.addEventListener('click', event => {
+    const move = event.target.closest('[data-calendar-move]');
+    if (move) { moveCalendarMonth(Number(move.dataset.calendarMove)); return; }
+    const day = event.target.closest('[data-calendar-date]'); if (!day) return;
+    const [year, month, date] = day.dataset.calendarDate.split('-').map(Number); const selectedDate = new Date(year, month - 1, date, 12);
+    const action = calendarSelectAction; closeJournalCalendar();
+    if (action) action(selectedDate); else requestAction(() => openSingleJournalDate(selectedDate));
   });
+  journalCalendar.addEventListener('keydown', event => {
+    const day = event.target.closest('[data-calendar-date]'); if (!day) return;
+    const movements = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+    if (event.key in movements) {
+      event.preventDefault(); const next = new Date(calendarFocusDate); next.setDate(next.getDate() + movements[event.key]); focusCalendarDate(next);
+    } else if (event.key === 'PageUp' || event.key === 'PageDown') {
+      event.preventDefault(); moveCalendarMonth(event.key === 'PageUp' ? -1 : 1);
+    } else if (event.key === 'Home' && event.ctrlKey) {
+      event.preventDefault(); focusCalendarDate(new Date());
+    }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!journalCalendar.hidden && !journalCalendar.contains(event.target) && event.target !== $('#journalCalendarButton')) closeJournalCalendar();
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !journalCalendar.hidden) closeJournalCalendar(); });
   $('#commandButton').addEventListener('click', () => showCommandPalette());
   $('#documentationClose').addEventListener('click', closeDocumentation);
   document.addEventListener('keydown', handleVimKeydown, true);
@@ -1972,17 +2196,50 @@ Open, save, export, and reach recent documents or headings from the command pale
     const field = event.target === sourceEditor ? sourceEditor : (event.target === activeGraphBlock?.field ? activeGraphBlock.field : (event.target === activeSourceBlock ? activeSourceBlock : null));
     if (field) requestAnimationFrame(() => showVimCursor(field, field.selectionStart));
   });
-  $('#commandInput').addEventListener('input', () => { selectedCommand = 0; renderCommandList(); });
+  $('#commandInput').addEventListener('input', () => { selectedCommand = -1; expandedCommandSections.clear(); renderCommandList(); });
   $('#commandInput').addEventListener('keydown', event => {
     event.stopPropagation();
+    if (event.key === 'Tab' && !event.shiftKey && $('.command-palette').classList.contains('searching')) {
+      const firstPage = $('#recentPageList .command-item');
+      if (firstPage) { event.preventDefault(); firstPage.focus(); }
+    }
     if (event.key === 'ArrowDown') { event.preventDefault(); selectedCommand = Math.min(selectedCommand + 1, filteredCommands.length - 1); renderCommandList(); }
     if (event.key === 'ArrowUp') { event.preventDefault(); selectedCommand = Math.max(selectedCommand - 1, 0); renderCommandList(); }
     if (event.key === 'Enter') { event.preventDefault(); runSelectedCommand(); }
     if (event.key === 'Escape') { event.preventDefault(); closeCommandPalette(); }
   });
-  $('#commandList').addEventListener('click', event => {
-    const item = event.target.closest('[data-command-index]'); if (item) runSelectedCommand(Number(item.dataset.commandIndex));
+  $('#commandPalette').addEventListener('focusin', event => {
+    const item = event.target.closest('[data-command-index]'); if (!item) return;
+    selectedCommand = Number(item.dataset.commandIndex);
+    $$('.command-item', $('#commandPalette')).forEach(command => {
+      const selected = command === item; command.classList.toggle('selected', selected); command.setAttribute('aria-selected', String(selected));
+    });
   });
+  function handleCommandListClick(event) {
+    const item = event.target.closest('[data-command-index]'); if (item) runSelectedCommand(Number(item.dataset.commandIndex));
+  }
+  function expandCommandSection(section) {
+    const button = $(`[data-command-section-more="${section}"]`); if (!button || button.hidden) return;
+    const keepInputFocus = document.activeElement === $('#commandInput');
+    const focusedIndex = document.activeElement.closest?.('[data-command-index]')?.dataset.commandIndex;
+    expandedCommandSections.add(section); renderCommandList();
+    if (keepInputFocus) $('#commandInput').focus();
+    else if (focusedIndex != null) $(`[data-command-index="${focusedIndex}"]`, $('#commandPalette'))?.focus();
+  }
+  $('#commandPalette').addEventListener('keydown', event => {
+    if (event.key !== 'ArrowDown' || (!event.ctrlKey && !event.metaKey)) return;
+    const activeSection = document.activeElement.closest?.('[data-command-section]')?.dataset.commandSection;
+    const selectedSection = $('.command-item.selected', $('#commandPalette'))?.closest('[data-command-section]')?.dataset.commandSection;
+    const section = activeSection || selectedSection;
+    const button = (section && $(`[data-command-section-more="${section}"]:not([hidden])`)) || $('[data-command-section-more]:not([hidden])');
+    if (!button) return;
+    event.preventDefault(); event.stopPropagation(); expandCommandSection(button.dataset.commandSectionMore);
+  }, true);
+  $$('[data-command-section-more]').forEach(button => button.addEventListener('click', () => expandCommandSection(button.dataset.commandSectionMore)));
+  $('#createPageList').addEventListener('click', handleCommandListClick);
+  $('#commandList').addEventListener('click', handleCommandListClick);
+  $('#blockResultList').addEventListener('click', handleCommandListClick);
+  $('#recentPageList').addEventListener('click', handleCommandListClick);
   $('#commandPalette').addEventListener('pointerdown', event => { if (event.target === $('#commandPalette')) closeCommandPalette(); });
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0]; if (file) loadMarkdown(await file.text(), file.name); fileInput.value = '';
@@ -1997,13 +2254,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     changed();
   });
   sourceEditor.addEventListener('input', changed);
-  sourceEditor.addEventListener('keydown', event => {
-    if (handleWikiPair(event)) return;
-    const line = sourceEditor.value.slice(0, sourceEditor.selectionStart).split('\n').pop();
-    if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !line.trim()) {
-      event.preventDefault(); showCommandPalette('/');
-    }
-  });
+  sourceEditor.addEventListener('keydown', handleWikiPair);
   editor.addEventListener('paste', event => {
     if (event.target.matches?.('.md-source-block')) return;
     event.preventDefault();
@@ -2071,10 +2322,6 @@ Open, save, export, and reach recent documents or headings from the command pale
   graphAutocomplete.addEventListener('click', event => {
     const item = event.target.closest('[data-autocomplete-index]'); if (item) chooseGraphAutocomplete(Number(item.dataset.autocompleteIndex));
   });
-  journalDatePicker.addEventListener('change', () => {
-    const [year, month, day] = journalDatePicker.value.split('-').map(Number);
-    if (year && month && day) requestAction(() => openJournalDate(new Date(year, month - 1, day)));
-  });
 
   function setTheme(theme) {
     app.classList.remove('theme-sepia', 'theme-dark'); if (theme !== 'light') app.classList.add(`theme-${theme}`);
@@ -2104,9 +2351,6 @@ Open, save, export, and reach recent documents or headings from the command pale
       event.preventDefault(); navigateGraphHistory(event.key === 'ArrowLeft' ? -1 : 1); return;
     }
     if (event.key === 'F2') { event.preventDefault(); commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); return; }
-    if (event.key === '/' && !mod && !event.altKey && !activeSourceBlock && !state.sourceMode && (event.target === editor || editor.contains(event.target))) {
-      event.preventDefault(); withMarkdownField(() => showCommandPalette()); return;
-    }
     if (event.key === 'F1' || (mod && key === 'k') || (mod && event.shiftKey && key === 'p')) { event.preventDefault(); showCommandPalette(); return; }
     if (!$('#commandPalette').hidden) return;
     if (mod && event.shiftKey && key === 'e') { event.preventDefault(); exportHtml(); return; }
@@ -2200,24 +2444,33 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (docs.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(docs.slice(0, 10)));
     saveSettings({ welcomeVersion: WELCOME_VERSION });
   }
-  docs = getStoredDocs();
-  if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
-  else loadMarkdown(starter, 'Welcome');
+  function loadInitialDocument() {
+    const storedDocs = getStoredDocs();
+    if (storedDocs.length) loadMarkdown(storedDocs[0].markdown, storedDocs[0].name, { id: storedDocs[0].id });
+    else loadMarkdown(starter, 'Welcome');
+  }
 
+  app.classList.add('initial-loading');
+  saveState.textContent = 'Loading…';
   (async () => {
     try {
       const remote = await MarkdGraph.RemoteGraphStore.connect();
       graphStore = remote; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages); watchRemoteGraph();
-      if (!state.dirty) { journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true); }
+      if (state.dirty) return;
+      journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
       return;
     } catch {}
     try {
       const restored = await MarkdGraph.GraphStore.restore();
-      if (!restored || !(await restored.ensurePermission(false))) return;
-      graphStore = restored; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
-      if (!state.dirty) { journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true); }
+      if (restored && await restored.ensurePermission(false)) {
+        graphStore = restored; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
+        if (state.dirty) return;
+        journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
+        return;
+      }
     } catch {}
-  })();
+    if (!state.dirty) loadInitialDocument();
+  })().finally(() => app.classList.remove('initial-loading'));
 
   if ('launchQueue' in window) {
     window.launchQueue.setConsumer(async launchParams => {

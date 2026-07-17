@@ -32,8 +32,7 @@ Open the command palette with:
 - `⌘/Ctrl + K`;
 - `⌘/Ctrl + Shift + P`;
 - `F1`;
-- `/` in an empty block;
-- `/` or `:` in Vim Normal mode.
+- `:` in Vim Normal mode.
 
 Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, and open this documentation.
 
@@ -152,14 +151,15 @@ Previous journal pages appear below today's entry and load progressively while s
 
 | Action | Command |
 | --- | --- |
-| Today | `⌘/Ctrl + Shift + J` |
-| Yesterday | `/yesterday` |
-| Tomorrow | `/tomorrow` |
-| Select a date | `/date picker` |
+| Open today's journal | `⌘/Ctrl + Shift + J` |
+| Insert today's journal reference | `/today` |
+| Insert yesterday's journal reference | `/yesterday` |
+| Insert tomorrow's journal reference | `/tomorrow` |
+| Insert a selected journal date | `/date picker` |
 | Previous page | `Alt + ←` |
 | Next page | `Alt + →` |
 
-The date picker opens or creates the journal for the selected date.
+Type `/` inside a graph block to show the inline command menu directly below the block. Journal commands insert `[[page references]]`; the date picker only selects and inserts a date and does not navigate away from the current page.
 
 ## Vim mode
 

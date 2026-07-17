@@ -40,7 +40,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - contextual block editing that reveals Markdown source and formats it again when focus moves away;
 - block navigation with arrow keys or `Alt + ↑/↓`;
 - optional persistent Vim mode with Normal/Insert modes, `h/j/k/l`, word and document motions, `Ctrl-D/U`, and undo/redo with `u` and `Ctrl-R`;
-- command palette with icon-only quick actions for new, open, save, and export, available with `/` in Vim mode, `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
+- command palette split between commands and recent pages, with a shared search field, available with `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
 - shortcuts for files, search, formatting, navigation, and appearance;
 - visual Markdown editing and full source mode;
 - headings, links, quotes, lists, tasks, code blocks, and tables;
@@ -67,6 +67,6 @@ In direct local mode, no content is sent to a server. Automatic document copies 
 
 Use **Open local graph** from the command palette and select a folder. markd reads Markdown files at the graph root and under `pages/` and `journals/`. The graph index is rebuilt locally and supports Logseq-style page and block references. In the outliner, use `Enter` to add a sibling, `Shift+Enter` for a line break, `Tab`/`Shift+Tab` to change depth, `Alt+↑/↓` to reorder, and `⌘/Ctrl+Enter` to cycle task states. Click a bullet to zoom into it; use the small arrow to collapse or expand nested blocks.
 
-Opening a graph starts on today's Logseq-compatible journal. Existing journals are shown below it in reverse chronological order and loaded progressively while scrolling. From an empty block, use `/yesterday`, `/tomorrow`, or `/date picker` to open or create another journal date. Use `⌘/Ctrl+Shift+J` for today's journal and `Alt+←/→` to move backward or forward through page history. The journal filename and displayed date follow `:journal/file-name-format` and `:journal/page-title-format` from `logseq/config.edn` (default filename: `yyyy_MM_dd.md`).
+Opening a graph starts on today's Logseq-compatible journal. Existing journals are shown below it in reverse chronological order and loaded progressively while scrolling. In a block, type `/` to show inline commands: `/today`, `/yesterday`, and `/tomorrow` insert journal references, while `/date picker` lets you choose a date and inserts it as a `[[page reference]]`. Use `⌘/Ctrl+Shift+J` for today's journal and `Alt+←/→` to move backward or forward through page history. The journal filename and displayed date follow `:journal/file-name-format` and `:journal/page-title-format` from `logseq/config.edn` (default filename: `yyyy_MM_dd.md`).
 
 Direct directory access requires the File System Access API and currently works best in Chromium-based browsers. Other browsers can continue to use the single-document editor and download-based saving.
