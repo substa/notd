@@ -7,6 +7,11 @@
   const editor = $('#editor');
   const sourceEditor = $('#sourceEditor');
   const markdWrap = $('#markdWrap');
+  const outliner = $('#outliner');
+  const blockTree = $('#blockTree');
+  const references = $('#references');
+  const graphName = $('#graphName');
+  const graphAutocomplete = $('#graphAutocomplete');
   const fileName = $('#fileName');
   const fileInput = $('#fileInput');
   const saveState = $('#saveState');
@@ -15,8 +20,13 @@
 
   let state = {
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
-    vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null
+    vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
+    graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false
   };
+  let graphStore = null;
+  let graphIndex = null;
+  let activeGraphBlock = null;
+  let graphDraftTimer = null;
   let activeSourceBlock = null;
   let paletteContext = null;
   let filteredCommands = [];
@@ -90,7 +100,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function safeUrl(url) {
     const decoded = url.trim().replace(/&amp;/g, '&');
-    return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(decoded) ? escapeHtml(decoded) : '#';
+    return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(decoded) || !/^[a-z][a-z0-9+.-]*:/i.test(decoded) ? escapeHtml(decoded) : '#';
   }
 
   function inlineMarkdown(text) {
@@ -259,7 +269,417 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function currentMarkdown() {
+    if (state.graphMode) return state.sourceMode ? sourceEditor.value : MarkdGraph.serializeDocument(state.graphDocument);
     return state.sourceMode ? sourceEditor.value : editorToMarkdown();
+  }
+
+  function graphBlockLocation(id, blocks = state.graphDocument?.blocks || [], parent = null) {
+    for (let index = 0; index < blocks.length; index++) {
+      const block = blocks[index];
+      if (block.id === id) return { block, blocks, index, parent };
+      const nested = graphBlockLocation(id, block.children, block);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  function visibleGraphBlocks(blocks = state.graphDocument?.blocks || [], result = []) {
+    for (const block of blocks) {
+      result.push(block);
+      if (!block.collapsed) visibleGraphBlocks(block.children, result);
+    }
+    return result;
+  }
+
+  function restoreGraphCollapse() {
+    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const collapsed = new Set(settings.graphCollapsed?.[state.graphPage?.path] || []);
+    MarkdGraph.flattenBlocks(state.graphDocument?.blocks).forEach(({ block }) => { block.collapsed = collapsed.has(block.id); });
+  }
+
+  function saveGraphCollapse() {
+    if (!state.graphPage) return;
+    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const ids = MarkdGraph.flattenBlocks(state.graphDocument?.blocks).filter(({ block }) => block.collapsed).map(({ block }) => block.id);
+    saveSettings({ graphCollapsed: { ...(settings.graphCollapsed || {}), [state.graphPage.path]: ids } });
+  }
+
+  function graphDisplayContent(block) {
+    const propertyLines = [];
+    const visible = String(block.content || '').split('\n').filter(line => {
+      const property = line.match(/^\s*([\w-]+)::\s*(.*?)\s*$/);
+      if (property) { if (property[1].toLowerCase() !== 'id') propertyLines.push(property); return false; }
+      return true;
+    }).join('\n').trimEnd();
+    let html = inlineMarkdown(visible).replace(/\n/g, '<br>');
+    html = html.replace(/^(TODO|DOING|DONE)\b/, status => `<button class="graph-task graph-task-${status.toLowerCase()}" data-task-block="${escapeHtml(block.id)}">${status}</button>`);
+    html = html.replace(/\[\[([^\]]+?)\]\]/g, (_, target) => {
+      const [page, alias] = target.split('|');
+      return `<button class="graph-page-ref" data-page="${escapeHtml(page.trim())}">${alias ? escapeHtml(alias.trim()) : escapeHtml(page.trim())}</button>`;
+    });
+    html = html.replace(/\(\(([0-9a-z-]{8,})\)\)/gi, (_, uuid) => {
+      const resolved = graphIndex?.resolveBlock(uuid);
+      const label = resolved ? resolved.content.split('\n')[0].replace(/^\s*(?:[\w-]+::.*)?$/, '').trim() || uuid : uuid;
+      return `<button class="graph-block-ref" data-block-ref="${escapeHtml(uuid)}" title="${escapeHtml(uuid)}">${escapeHtml(label)}</button>`;
+    });
+    html = html.replace(/(^|\s)#([\p{L}\p{N}_/-]+)/gu, '$1<button class="graph-tag" data-page="$2">#$2</button>');
+    if (propertyLines.length) html += `${html ? '<br>' : ''}${propertyLines.map(item => `<span class="graph-property">${escapeHtml(item[1])} · ${escapeHtml(item[2])}</span>`).join('')}`;
+    return html;
+  }
+
+  function graphContentElement(block) {
+    const content = document.createElement('div');
+    content.className = 'graph-block-content';
+    content.dataset.blockId = block.id;
+    content.innerHTML = graphDisplayContent(block);
+    if (graphStore && state.graphPage) {
+      $$('img', content).forEach(image => {
+        const source = image.getAttribute('src');
+        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, state.graphPage.folder).then(url => { if (image.isConnected) image.src = url; }).catch(() => {});
+      });
+    }
+    return content;
+  }
+
+  function renderGraphPage() {
+    if (!state.graphMode || !state.graphDocument) return;
+    activeGraphBlock = null;
+    const renderBlocks = blocks => {
+      const fragment = document.createDocumentFragment();
+      for (const block of blocks) {
+        const node = document.createElement('div');
+        node.className = `block-node${block.children.length ? ' has-children' : ''}${block.collapsed ? ' collapsed' : ''}`;
+        node.dataset.blockId = block.id;
+        const row = document.createElement('div'); row.className = 'block-row';
+        let toggle;
+        if (block.children.length) {
+          toggle = document.createElement('button'); toggle.className = 'block-toggle'; toggle.type = 'button';
+          toggle.dataset.blockToggle = block.id;
+          toggle.setAttribute('aria-label', block.collapsed ? 'Expand nested blocks' : 'Collapse nested blocks');
+        } else {
+          toggle = document.createElement('span'); toggle.className = 'block-toggle-spacer';
+        }
+        const bullet = document.createElement('button');
+        bullet.className = 'block-bullet'; bullet.type = 'button'; bullet.dataset.blockBullet = block.id;
+        bullet.setAttribute('aria-label', 'Zoom into block');
+        row.append(toggle, bullet, graphContentElement(block)); node.append(row);
+        if (block.children.length) {
+          const children = document.createElement('div'); children.className = 'block-children'; children.append(renderBlocks(block.children)); node.append(children);
+        }
+        fragment.append(node);
+      }
+      return fragment;
+    };
+    let roots = state.graphDocument.blocks;
+    if (state.graphZoomId) roots = [graphBlockLocation(state.graphZoomId)?.block].filter(Boolean);
+    blockTree.replaceChildren(renderBlocks(roots));
+    const preamble = $('#pagePreamble');
+    const preambleText = state.graphDocument.preamble.join('\n').trim();
+    preamble.hidden = !preambleText; preamble.textContent = preambleText;
+    const breadcrumb = $('#zoomBreadcrumb');
+    breadcrumb.hidden = !state.graphZoomId;
+    breadcrumb.innerHTML = state.graphZoomId ? `<button type="button" data-clear-zoom>${escapeHtml(state.graphPage?.title || 'Page')}</button> / Block` : '';
+    renderReferences();
+  }
+
+  function resizeGraphEditor(field) {
+    field.style.height = '0'; field.style.height = `${Math.max(28, field.scrollHeight)}px`;
+  }
+
+  function commitGraphBlock() {
+    if (!activeGraphBlock) return;
+    const { block, field } = activeGraphBlock;
+    activeGraphBlock = null;
+    hideGraphAutocomplete();
+    if (field.isConnected) field.replaceWith(graphContentElement(block));
+  }
+
+  function activateGraphBlock(block, position = null) {
+    if (!block || state.sourceMode) return;
+    if (activeGraphBlock?.block === block) return activeGraphBlock.field.focus();
+    commitGraphBlock();
+    const content = $$('.graph-block-content', blockTree).find(element => element.dataset.blockId === block.id);
+    if (!content) return;
+    const field = document.createElement('textarea');
+    field.className = 'graph-block-editor'; field.spellcheck = true; field.value = block.content;
+    field.dataset.blockId = block.id;
+    field.addEventListener('input', handleGraphBlockInput);
+    field.addEventListener('keydown', handleGraphBlockKeydown);
+    field.addEventListener('blur', () => setTimeout(() => {
+      if (activeGraphBlock?.field === field && $('#commandPalette').hidden && !graphAutocomplete.contains(document.activeElement)) commitGraphBlock();
+    }));
+    content.replaceWith(field); activeGraphBlock = { block, field }; resizeGraphEditor(field);
+    const caret = position === null ? field.value.length : Math.max(0, Math.min(position, field.value.length));
+    field.focus({ preventScroll: true }); field.setSelectionRange(caret, caret);
+  }
+
+  function focusGraphBlock(id, position = null) {
+    renderGraphPage();
+    const focus = () => {
+      const location = graphBlockLocation(id); if (!location) return false;
+      activateGraphBlock(location.block, position);
+      const field = activeGraphBlock?.block?.id === id ? activeGraphBlock.field : null;
+      if (!field) return false;
+      const caret = position === null ? field.value.length : Math.max(0, Math.min(position, field.value.length));
+      field.focus({ preventScroll: true }); field.setSelectionRange(caret, caret);
+      return true;
+    };
+    focus();
+    requestAnimationFrame(() => {
+      if (document.activeElement !== activeGraphBlock?.field) focus();
+      activeGraphBlock?.field.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  let graphIndexTimer = null;
+  function updateGraphIndex() {
+    if (!graphIndex || !state.graphPage) return;
+    graphIndex.updatePage(state.graphPage, currentMarkdown());
+    renderReferences();
+  }
+
+  function graphChanged() {
+    if (!state.graphMode || !state.graphPage) return;
+    state.dirty = true;
+    saveState.textContent = state.graphConflict ? 'Conflict' : 'Modified';
+    clearTimeout(state.saveTimer); state.saveTimer = setTimeout(() => flushGraphSave(false), 650);
+    clearTimeout(graphDraftTimer); graphDraftTimer = setTimeout(() => {
+      MarkdGraph.saveDraft(state.graphPage.path, { content: currentMarkdown(), modified: state.graphPage.lastModified }).catch(() => {});
+    }, 120);
+    clearTimeout(graphIndexTimer); graphIndexTimer = setTimeout(updateGraphIndex, 240);
+    updateStats();
+  }
+
+  let graphSaving = null;
+  async function flushGraphSave(interactive = false, force = false) {
+    if (!state.graphMode || !state.graphPage || !state.dirty) return true;
+    if (state.graphConflict && !force) {
+      saveState.textContent = 'Conflict';
+      if (!interactive || !confirm('The recovered draft conflicts with the file on disk. Overwrite the disk version?')) return false;
+      force = true;
+    }
+    if (graphSaving) { await graphSaving; if (!state.dirty) return true; }
+    const page = state.graphPage; const content = currentMarkdown();
+    clearTimeout(graphDraftTimer);
+    await MarkdGraph.saveDraft(page.path, { content, modified: page.lastModified }).catch(() => {});
+    saveState.textContent = 'Saving…';
+    graphSaving = (async () => {
+      try {
+        try { await graphStore.writePage(page, content, { force }); }
+        catch (error) {
+          if (error.name !== 'ConflictError') throw error;
+          state.graphConflict = true; saveState.textContent = 'Conflict';
+          if (!interactive || !confirm('This page changed on disk. Overwrite the external changes?')) return false;
+          await graphStore.writePage(page, content, { force: true });
+        }
+        graphIndex.updatePage(page, content);
+        await MarkdGraph.removeDraft(page.path).catch(() => {});
+        if (state.graphPage === page && currentMarkdown() === content) {
+          state.dirty = false; app.classList.remove('dirty'); saveState.textContent = 'Saved';
+        }
+        state.graphConflict = false;
+        return true;
+      } catch (error) {
+        saveState.textContent = 'Save failed'; if (interactive) toast(error.message || 'Could not save the page');
+        return false;
+      }
+    })();
+    const result = await graphSaving; graphSaving = null; return result;
+  }
+
+  async function loadGraphPage(pageOrTitle, options = {}) {
+    if (!graphStore || !graphIndex) return;
+    if (state.graphMode && state.dirty && !(await flushGraphSave(true))) return;
+    let page = typeof pageOrTitle === 'string' ? graphIndex.resolvePage(pageOrTitle) : pageOrTitle;
+    if (!page && typeof pageOrTitle === 'string' && options.create !== false) {
+      page = await graphStore.createPage(pageOrTitle, options);
+      graphIndex.rebuild(graphStore.pages);
+    }
+    if (!page) return toast('Page not found');
+    const draft = await MarkdGraph.getDraft(page.path).catch(() => null);
+    const content = draft?.content ?? page.content;
+    const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
+    state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
+    state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
+    activeSourceBlock = null; activeGraphBlock = null;
+    editor.hidden = true; sourceEditor.hidden = true; outliner.hidden = false;
+    app.classList.add('graph-mode'); app.classList.toggle('dirty', Boolean(draft));
+    graphName.hidden = false; graphName.textContent = graphStore.name; $('#vimStatus').hidden = true;
+    fileName.value = page.title; document.title = `${page.title} — ${graphStore.name} — markd`;
+    saveSettings({ lastGraphPage: page.title });
+    renderGraphPage(); updateStats();
+    saveState.textContent = draftConflict ? 'Recovery conflict' : (draft ? 'Recovered draft' : 'Ready');
+    requestAnimationFrame(() => {
+      if (options.blockId) blockTree.querySelector(`[data-block-id="${CSS.escape(options.blockId)}"]`)?.scrollIntoView({ block: 'center' });
+    });
+  }
+
+  async function openGraph() {
+    try {
+      if (state.graphMode && state.dirty && !(await flushGraphSave(true))) return;
+      saveState.textContent = 'Opening graph…';
+      graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open();
+      const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
+      let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+      const initial = graphIndex.resolvePage(settings.lastGraphPage) || graphIndex.allPages()[0];
+      if (initial) await loadGraphPage(initial);
+      else await loadGraphPage('Home', { create: true });
+      toast(`Opened ${graphStore.name}`);
+    } catch (error) { if (error.name !== 'AbortError') toast(error.message || 'Could not open the graph'); }
+  }
+
+  async function openToday() {
+    if (!graphStore) return openGraph();
+    const journal = MarkdGraph.journalInfo();
+    let page = graphIndex.resolvePage(journal.title) || graphStore.pages.find(item => item.journal && item.name === `${journal.filename}.md`);
+    if (!page) {
+      page = await graphStore.createPage(journal.title, { journal: true, filename: journal.filename });
+      graphIndex.rebuild(graphStore.pages);
+    }
+    loadGraphPage(page);
+  }
+
+  async function closeGraph() {
+    if (state.dirty && !(await flushGraphSave(true))) return;
+    graphStore?.disposeAssets();
+    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null;
+    outliner.hidden = true; graphName.hidden = true; app.classList.remove('graph-mode');
+    const docs = getStoredDocs();
+    if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
+    else loadMarkdown('', 'Untitled');
+  }
+
+  function renderReferences(includeUnlinked = false) {
+    if (!state.graphMode || !graphIndex || !state.graphPage) { references.innerHTML = ''; return; }
+    const renderGroups = items => {
+      const groups = new Map();
+      items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
+      return [...groups].map(([title, group]) => `<div class="reference-group"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${escapeHtml(item.content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220))}</button>`).join('')}</div>`).join('');
+    };
+    const linked = graphIndex.referencesToPage(state.graphPage.title);
+    const zoomedBlock = state.graphZoomId ? graphBlockLocation(state.graphZoomId)?.block : null;
+    const blockUuid = zoomedBlock && MarkdGraph.propertiesFrom(zoomedBlock.content).id;
+    const blockLinked = blockUuid ? graphIndex.referencesToBlock(blockUuid) : [];
+    const unlinked = includeUnlinked ? graphIndex.unlinkedReferences(state.graphPage.title) : [];
+    references.innerHTML = `<details${linked.length ? ' open' : ''}><summary>Linked references · ${linked.length}</summary>${renderGroups(linked)}</details>${blockUuid ? `<details${blockLinked.length ? ' open' : ''}><summary>Block references · ${blockLinked.length}</summary>${renderGroups(blockLinked)}</details>` : ''}${includeUnlinked ? `<details${unlinked.length ? ' open' : ''}><summary>Unlinked references · ${unlinked.length}</summary>${renderGroups(unlinked)}</details>` : '<button class="unlinked-button" data-show-unlinked>Find unlinked references</button>'}`;
+  }
+
+  function graphMutationFocus(block, position = null) { graphChanged(); focusGraphBlock(block.id, position); }
+
+  function handleGraphBlockInput(event) {
+    const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
+    location.block.content = field.value; activeGraphBlock.block = location.block; resizeGraphEditor(field); graphChanged(); showGraphAutocomplete(field);
+  }
+
+  function handleWikiPair(event) {
+    const field = event.currentTarget;
+    if (!state.graphMode || field.selectionStart !== field.selectionEnd) return false;
+    const position = field.selectionStart;
+    if (event.key === '[' && field.value[position - 1] === '[') {
+      event.preventDefault();
+      field.setRangeText('[]]', position, position, 'end');
+      field.setSelectionRange(position + 1, position + 1);
+      field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '[' }));
+      return true;
+    }
+    if (event.key === ']' && field.value[position] === ']') {
+      event.preventDefault(); field.setSelectionRange(position + 1, position + 1); hideGraphAutocomplete(); return true;
+    }
+    return false;
+  }
+
+  function moveGraphBlock(block, direction) {
+    const location = graphBlockLocation(block.id); if (!location) return;
+    const target = location.index + direction; if (target < 0 || target >= location.blocks.length) return;
+    location.blocks.splice(location.index, 1); location.blocks.splice(target, 0, block); graphMutationFocus(block);
+  }
+
+  function indentGraphBlock(block, outdent = false) {
+    const location = graphBlockLocation(block.id); if (!location) return;
+    if (!outdent) {
+      const previous = location.blocks[location.index - 1]; if (!previous) return;
+      location.blocks.splice(location.index, 1); previous.children.push(block); previous.collapsed = false;
+    } else {
+      if (!location.parent) return;
+      const parentLocation = graphBlockLocation(location.parent.id); if (!parentLocation) return;
+      location.blocks.splice(location.index, 1); parentLocation.blocks.splice(parentLocation.index + 1, 0, block);
+    }
+    graphMutationFocus(block);
+  }
+
+  function toggleGraphTask(block, focus = true) {
+    const match = block.content.match(/^(TODO|DOING|DONE)(?:\s+|$)/);
+    const next = !match ? `TODO ${block.content}` : match[1] === 'TODO' ? block.content.replace(/^TODO/, 'DOING') : match[1] === 'DOING' ? block.content.replace(/^DOING/, 'DONE') : block.content.replace(/^DONE(?:\s+|$)/, '');
+    block.content = next;
+    if (focus) graphMutationFocus(block, 0); else { graphChanged(); renderGraphPage(); }
+  }
+
+  function createNextGraphBlock(block, content = '') {
+    const location = graphBlockLocation(block.id); if (!location) return null;
+    const next = { id: MarkdGraph.newId(), uuid: null, content, marker: block.marker || '-', children: [], collapsed: false };
+    if (state.graphZoomId === block.id) { block.collapsed = false; block.children.unshift(next); saveGraphCollapse(); }
+    else location.blocks.splice(location.index + 1, 0, next);
+    graphMutationFocus(next, 0); return next;
+  }
+
+  function handleGraphBlockKeydown(event) {
+    const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
+    const block = location.block;
+    if (handleWikiPair(event)) return;
+    if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+      event.preventDefault(); handleGraphAutocompleteKey(event.key); return;
+    }
+    if (event.key === 'Tab') { event.preventDefault(); indentGraphBlock(block, event.shiftKey); return; }
+    if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); moveGraphBlock(block, event.key === 'ArrowUp' ? -1 : 1); return; }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); toggleGraphTask(block); return; }
+    if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      const start = field.selectionStart, end = field.selectionEnd;
+      block.content = field.value.slice(0, start);
+      createNextGraphBlock(block, field.value.slice(end)); return;
+    }
+    if (event.key === 'Backspace' && !field.value && visibleGraphBlocks().length > 1) {
+      event.preventDefault(); const visible = visibleGraphBlocks(); const position = visible.indexOf(block); const previous = visible[position - 1] || visible[position + 1];
+      location.blocks.splice(location.index, 1, ...(block.children || [])); graphChanged(); if (previous) focusGraphBlock(previous.id); else renderGraphPage(); return;
+    }
+    if ((event.key === 'ArrowUp' && field.selectionStart === 0) || (event.key === 'ArrowDown' && field.selectionStart === field.value.length)) {
+      const visible = visibleGraphBlocks(); const index = visible.indexOf(block); const target = visible[index + (event.key === 'ArrowUp' ? -1 : 1)];
+      if (target) { event.preventDefault(); focusGraphBlock(target.id, event.key === 'ArrowUp' ? target.content.length : 0); }
+    }
+    if (event.key === 'Escape') { event.preventDefault(); commitGraphBlock(); }
+  }
+
+  let autocompleteItems = []; let autocompleteIndex = 0;
+  function showGraphAutocomplete(field) {
+    const before = field.value.slice(0, field.selectionStart); const match = before.match(/\[\[([^\]]*)$/);
+    if (!match || !graphIndex) return hideGraphAutocomplete();
+    const title = match[1].trim(); const query = MarkdGraph.normalizePage(title);
+    const pages = graphIndex.allPages();
+    const matches = pages.filter(page => !query || MarkdGraph.normalizePage(page.title).includes(query)).slice(0, 12);
+    const exactMatch = query && pages.some(page => MarkdGraph.normalizePage(page.title) === query);
+    autocompleteItems = title && !exactMatch ? [{ title, create: true }, ...matches].slice(0, 12) : matches;
+    if (!autocompleteItems.length) return hideGraphAutocomplete();
+    autocompleteIndex = 0;
+    graphAutocomplete.innerHTML = autocompleteItems.map((page, index) => `<button type="button" data-autocomplete-index="${index}" class="${index === 0 ? 'selected' : ''}">${page.create ? `<span class="autocomplete-create">Create page</span>${escapeHtml(page.title)}` : escapeHtml(page.title)}</button>`).join('');
+    const rect = field.getBoundingClientRect(); graphAutocomplete.style.left = `${Math.min(innerWidth - 312, Math.max(12, rect.left + 20))}px`; graphAutocomplete.style.top = `${Math.min(innerHeight - 230, rect.bottom + 4)}px`; graphAutocomplete.hidden = false;
+  }
+  function hideGraphAutocomplete() { graphAutocomplete.hidden = true; autocompleteItems = []; }
+  function renderAutocompleteSelection() { $$('[data-autocomplete-index]', graphAutocomplete).forEach((item, index) => item.classList.toggle('selected', index === autocompleteIndex)); }
+  function chooseGraphAutocomplete(index = autocompleteIndex, advance = false) {
+    const page = autocompleteItems[index]; const field = activeGraphBlock?.field; const block = activeGraphBlock?.block;
+    if (!page || !field || !block) return;
+    const before = field.value.slice(0, field.selectionStart); const start = before.lastIndexOf('[[');
+    const closingLength = field.value.slice(field.selectionStart).startsWith(']]') ? 2 : 0;
+    field.setRangeText(`[[${page.title}]]`, start, field.selectionStart + closingLength, 'end'); field.dispatchEvent(new InputEvent('input', { bubbles: true })); hideGraphAutocomplete(); field.focus();
+    if (page.create) graphStore.createPage(page.title).then(() => {
+      graphIndex.rebuild(graphStore.pages); toast(`Page “${page.title}” created`);
+    }).catch(error => toast(error.message || 'Could not create the page'));
+    if (advance) createNextGraphBlock(block);
+  }
+  function handleGraphAutocompleteKey(key) {
+    if (key === 'Escape') return hideGraphAutocomplete();
+    if (key === 'Enter') return chooseGraphAutocomplete(autocompleteIndex, true);
+    autocompleteIndex = (autocompleteIndex + (key === 'ArrowDown' ? 1 : -1) + autocompleteItems.length) % autocompleteItems.length; renderAutocompleteSelection();
   }
 
   function markdownForBlock(block) {
@@ -742,8 +1162,11 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function loadMarkdown(markdown, name = 'Untitled', options = {}) {
+    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false;
+    outliner.hidden = true; graphName.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
+    app.classList.remove('graph-mode', 'source-mode'); updateVimUi();
     state.markdown = markdown;
-    activeSourceBlock = null;
+    activeSourceBlock = null; activeGraphBlock = null;
     vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null;
     state.fileHandle = options.handle || null;
     state.currentId = options.id || crypto.randomUUID?.() || String(Date.now());
@@ -759,6 +1182,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function changed() {
+    if (state.graphMode) { graphChanged(); return; }
     state.dirty = true;
     state.markdown = currentMarkdown();
     app.classList.add('dirty');
@@ -818,6 +1242,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   async function saveFile() {
+    if (state.graphMode) return flushGraphSave(true);
     let markdown = currentMarkdown();
     let name = (fileName.value.trim() || 'Untitled').replace(/\.(md|markdown)$/i, '') + '.md';
     try {
@@ -844,6 +1269,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function requestAction(action) {
+    if (state.graphMode) return flushGraphSave(true).then(saved => saved && action());
     if (!state.dirty) return action();
     state.pendingAction = action; $('#confirmDialog').hidden = false;
   }
@@ -853,6 +1279,17 @@ Open, save, export, and reach recent documents or headings from the command pale
   function toggleSource(force) {
     const shouldEnable = typeof force === 'boolean' ? force : !state.sourceMode;
     if (shouldEnable === state.sourceMode) return;
+    if (state.graphMode) {
+      if (shouldEnable) {
+        commitGraphBlock(); sourceEditor.value = MarkdGraph.serializeDocument(state.graphDocument);
+        outliner.hidden = true; sourceEditor.hidden = false;
+      } else {
+        state.graphDocument = MarkdGraph.parseDocument(sourceEditor.value); restoreGraphCollapse();
+        sourceEditor.hidden = true; outliner.hidden = false; renderGraphPage(); graphChanged();
+      }
+      state.sourceMode = shouldEnable; app.classList.toggle('source-mode', shouldEnable);
+      updateStats(); (shouldEnable ? sourceEditor : outliner).focus?.(); return;
+    }
     if (shouldEnable) { commitActiveBlock(); sourceEditor.value = editorToMarkdown(); editor.hidden = true; sourceEditor.hidden = false; }
     else { editor.innerHTML = markdownToHtml(sourceEditor.value); sourceEditor.hidden = true; editor.hidden = false; }
     state.sourceMode = shouldEnable; app.classList.toggle('source-mode', shouldEnable);
@@ -1022,12 +1459,14 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function activeMarkdownField() {
     if (paletteContext?.field?.isConnected) return paletteContext.field;
+    if (state.graphMode) return activeGraphBlock?.field?.isConnected ? activeGraphBlock.field : (state.sourceMode ? sourceEditor : null);
     if (activeSourceBlock?.isConnected) return activeSourceBlock;
     return state.sourceMode ? sourceEditor : null;
   }
 
   function notifyMarkdownField(field) {
     if (field === activeSourceBlock) resizeSourceBlock(field);
+    if (field === activeGraphBlock?.field) resizeGraphEditor(field);
     field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     field.focus();
   }
@@ -1035,6 +1474,11 @@ Open, save, export, and reach recent documents or headings from the command pale
   function withMarkdownField(callback) {
     const existing = activeMarkdownField();
     if (existing) { callback(existing); return; }
+    if (state.graphMode) {
+      const block = state.graphDocument?.blocks?.[0];
+      if (!block) return;
+      activateGraphBlock(block); requestAnimationFrame(() => activeGraphBlock && callback(activeGraphBlock.field)); return;
+    }
     let block = getSelection().anchorNode;
     if (block?.nodeType === Node.TEXT_NODE) block = block.parentElement;
     while (block && block.parentElement !== editor) block = block.parentElement;
@@ -1085,8 +1529,37 @@ Open, save, export, and reach recent documents or headings from the command pale
     });
   }
 
+  function selectedGraphBlock() {
+    const id = activeGraphBlock?.block?.id || paletteContext?.field?.dataset?.blockId;
+    return id ? graphBlockLocation(id)?.block : null;
+  }
+
+  async function copyGraphBlockReference() {
+    const block = selectedGraphBlock(); if (!state.graphMode || !block) return toast('Select a block first');
+    const properties = MarkdGraph.propertiesFrom(block.content);
+    const uuid = properties.id || MarkdGraph.newId();
+    if (!properties.id) { block.content = `${block.content.replace(/\s+$/, '')}\n${block.content ? '' : ''}id:: ${uuid}`; block.uuid = uuid; graphChanged(); renderGraphPage(); }
+    await navigator.clipboard.writeText(`((${uuid}))`); toast('Block reference copied');
+  }
+
+  function zoomGraphBlock() {
+    const block = selectedGraphBlock(); if (!state.graphMode || !block) return toast('Select a block first');
+    commitGraphBlock(); state.graphZoomId = block.id; renderGraphPage();
+  }
+
+  async function createGraphPage() {
+    if (!graphStore) return openGraph();
+    const title = prompt('Page name:'); if (title?.trim()) loadGraphPage(title.trim(), { create: true });
+  }
+
   const commands = [
-    { label: 'Rename document', shortcut: 'F2', keywords: 'title name file', run: () => { commitActiveBlock(); fileName.focus(); fileName.select(); } },
+    { label: 'Open local graph', keywords: 'folder logseq graph local', run: () => requestAction(openGraph) },
+    { label: 'New graph page', keywords: 'page create graph', run: () => requestAction(createGraphPage) },
+    { label: 'Today journal', keywords: 'daily notes journal today', run: () => requestAction(openToday) },
+    { label: 'Copy block reference', keywords: 'uuid block reference link', run: copyGraphBlockReference },
+    { label: 'Zoom into block', keywords: 'focus block outliner', run: zoomGraphBlock },
+    { label: 'Close graph', keywords: 'close folder graph', run: closeGraph },
+    { label: 'Rename document', shortcut: 'F2', keywords: 'title name file page', run: () => { commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); } },
     { label: 'Find in document', shortcut: '⌘ F', keywords: 'search', run: showFind },
     { label: 'Full Markdown source', shortcut: '⌘ /', keywords: 'source code', run: () => toggleSource() },
     { label: 'Toggle Vim mode', keywords: 'vim keyboard normal insert', run: () => setVimEnabled() },
@@ -1144,7 +1617,18 @@ Open, save, export, and reach recent documents or headings from the command pale
         toast('Document removed from recent files');
       }
     })) : [];
-    return [...recentCommands, ...headingCommands, ...removeCommands];
+    const graphPages = graphIndex ? graphIndex.allPages()
+      .filter(page => !query || MarkdGraph.normalizePage(page.title).includes(MarkdGraph.normalizePage(query)))
+      .slice(0, 80).map(page => ({
+        label: `Page: ${page.title}`, shortcut: page.journal ? 'Journal' : '', keywords: `graph page ${page.title}`,
+        run: () => loadGraphPage(page)
+      })) : [];
+    const graphResults = graphIndex && query.length >= 2 ? graphIndex.search(query, 24).map(result => ({
+      label: `Block: ${result.content.replace(/^\s*[\w-]+::.*$/gm, '').replace(/\[\[|\]\]/g, '').trim().slice(0, 80)}`,
+      shortcut: result.page.title, keywords: `graph search ${result.content}`,
+      run: () => loadGraphPage(result.page, { blockId: result.block.id })
+    })) : [];
+    return [...graphPages, ...graphResults, ...recentCommands, ...headingCommands, ...removeCommands];
   }
 
   function renderCommandList() {
@@ -1176,9 +1660,38 @@ Open, save, export, and reach recent documents or headings from the command pale
     closeCommandPalette(false); command.run(); paletteContext = null;
   }
 
+  async function renameGraphPage(title) {
+    const page = state.graphPage; const nextTitle = title.trim();
+    if (!page || !nextTitle || nextTitle === page.title) { if (page) fileName.value = page.title; return; }
+    try {
+      commitGraphBlock();
+      if (!(await flushGraphSave(true))) throw new Error('Save the current page before renaming it');
+      const oldTitle = page.title;
+      const duplicate = graphStore.findPage(nextTitle); if (duplicate && duplicate !== page) throw new Error('A page with this name already exists');
+      const updateLinks = confirm(`Rename “${oldTitle}” to “${nextTitle}” and update page references?`);
+      let currentContent = page.content.replace(/^(\s*title::\s*).+$/mi, `$1${nextTitle}`);
+      if (updateLinks) {
+        for (const linkedPage of [...graphStore.pages]) {
+          const content = linkedPage === page ? currentContent : linkedPage.content;
+          const updated = MarkdGraph.replacePageReferences(content, oldTitle, nextTitle);
+          if (updated !== content) {
+            await graphStore.writePage(linkedPage, updated);
+            if (linkedPage === page) currentContent = updated;
+          }
+        }
+      }
+      const renamed = await graphStore.renamePage(page, nextTitle, currentContent);
+      state.graphPage = renamed; state.graphDocument = MarkdGraph.parseDocument(currentContent); restoreGraphCollapse(); state.dirty = false;
+      graphIndex = new MarkdGraph.GraphIndex(graphStore.pages); fileName.value = nextTitle;
+      document.title = `${nextTitle} — ${graphStore.name} — markd`; saveSettings({ lastGraphPage: nextTitle });
+      renderGraphPage(); saveState.textContent = 'Saved'; toast('Page renamed');
+    } catch (error) { fileName.value = page.title; toast(error.message || 'Could not rename the page'); }
+  }
+
   // UI events
   document.addEventListener('pointerdown', event => {
     if (activeSourceBlock && !editor.contains(event.target) && !$('#commandPalette').contains(event.target)) commitActiveBlock();
+    if (activeGraphBlock && !outliner.contains(event.target) && !$('#commandPalette').contains(event.target) && !graphAutocomplete.contains(event.target)) commitGraphBlock();
   }, true);
   editor.addEventListener('focusout', () => setTimeout(() => {
     if (activeSourceBlock && $('#commandPalette').hidden && !editor.contains(document.activeElement)) commitActiveBlock();
@@ -1217,14 +1730,18 @@ Open, save, export, and reach recent documents or headings from the command pale
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0]; if (file) loadMarkdown(await file.text(), file.name); fileInput.value = '';
   });
-  fileName.addEventListener('input', changed);
-  fileName.addEventListener('blur', () => { if (!fileName.value.trim()) fileName.value = 'Untitled'; persistLocal(false); });
+  fileName.addEventListener('input', () => { if (!state.graphMode) changed(); });
+  fileName.addEventListener('blur', () => {
+    if (!fileName.value.trim()) fileName.value = state.graphMode ? state.graphPage.title : 'Untitled';
+    if (state.graphMode) renameGraphPage(fileName.value); else persistLocal(false);
+  });
   editor.addEventListener('input', event => {
     if (!event.target.matches?.('.md-source-block') && event.inputType?.startsWith('insert')) transformInlineMarkdown();
     changed();
   });
   sourceEditor.addEventListener('input', changed);
   sourceEditor.addEventListener('keydown', event => {
+    if (handleWikiPair(event)) return;
     const line = sourceEditor.value.slice(0, sourceEditor.selectionStart).split('\n').pop();
     if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !line.trim()) {
       event.preventDefault(); showCommandPalette();
@@ -1246,6 +1763,45 @@ Open, save, export, and reach recent documents or headings from the command pale
   editor.addEventListener('keydown', markdownShortcut);
   editor.addEventListener('click', event => {
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
+  });
+  outliner.addEventListener('click', event => {
+    const task = event.target.closest('[data-task-block]');
+    if (task) { const block = graphBlockLocation(task.dataset.taskBlock)?.block; if (block) toggleGraphTask(block, false); return; }
+    const pageLink = event.target.closest('[data-page]');
+    if (pageLink) { event.preventDefault(); loadGraphPage(pageLink.dataset.page, { create: true }); return; }
+    const blockReference = event.target.closest('[data-block-ref]');
+    if (blockReference) {
+      const resolved = graphIndex?.resolveBlock(blockReference.dataset.blockRef);
+      if (resolved) loadGraphPage(resolved.page, { blockId: resolved.block.id }); else toast('Referenced block not found');
+      return;
+    }
+    const reference = event.target.closest('[data-reference-page]');
+    if (reference) { loadGraphPage(reference.dataset.referencePage, { blockId: reference.dataset.referenceBlock }); return; }
+    if (event.target.closest('[data-show-unlinked]')) { renderReferences(true); return; }
+    if (event.target.closest('[data-clear-zoom]')) { state.graphZoomId = null; renderGraphPage(); return; }
+    const toggle = event.target.closest('[data-block-toggle]');
+    if (toggle) {
+      const block = graphBlockLocation(toggle.dataset.blockToggle)?.block;
+      if (block) { block.collapsed = !block.collapsed; saveGraphCollapse(); renderGraphPage(); }
+      return;
+    }
+    const bullet = event.target.closest('[data-block-bullet]');
+    if (bullet) {
+      const block = graphBlockLocation(bullet.dataset.blockBullet)?.block;
+      if (block) { commitGraphBlock(); block.collapsed = false; saveGraphCollapse(); state.graphZoomId = block.id; focusGraphBlock(block.id); }
+      return;
+    }
+    const content = event.target.closest('.graph-block-content');
+    if (content && !event.target.closest('button,a')) activateGraphBlock(graphBlockLocation(content.dataset.blockId)?.block);
+  });
+  $('#addBlock').addEventListener('click', () => {
+    const block = { id: MarkdGraph.newId(), uuid: null, content: '', marker: '-', children: [], collapsed: false };
+    state.graphDocument.blocks.push(block); graphMutationFocus(block, 0);
+  });
+  graphName.addEventListener('click', showCommandPalette);
+  graphAutocomplete.addEventListener('pointerdown', event => event.preventDefault());
+  graphAutocomplete.addEventListener('click', event => {
+    const item = event.target.closest('[data-autocomplete-index]'); if (item) chooseGraphAutocomplete(Number(item.dataset.autocompleteIndex));
   });
 
   function setTheme(theme) {
@@ -1269,7 +1825,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   document.addEventListener('keydown', event => {
     const mod = event.metaKey || event.ctrlKey; const key = event.key.toLowerCase();
-    if (event.key === 'F2') { event.preventDefault(); commitActiveBlock(); fileName.focus(); fileName.select(); return; }
+    if (event.key === 'F2') { event.preventDefault(); commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); return; }
     if (event.key === '/' && !mod && !event.altKey && !activeSourceBlock && !state.sourceMode && (event.target === editor || editor.contains(event.target))) {
       event.preventDefault(); withMarkdownField(() => showCommandPalette()); return;
     }
@@ -1291,6 +1847,29 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
 
   window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
+  let externalCheckTime = 0;
+  async function checkExternalGraphPage() {
+    if (!state.graphMode || !state.graphPage || Date.now() - externalCheckTime < 1500) return;
+    externalCheckTime = Date.now();
+    try {
+      if (state.dirty) {
+        const fresh = await graphStore.freshFile(state.graphPage);
+        if (fresh.lastModified !== state.graphPage.lastModified) { state.graphConflict = true; saveState.textContent = 'Conflict'; }
+        return;
+      }
+      const currentPath = state.graphPage.path; const previousModified = state.graphPage.lastModified;
+      const pages = await graphStore.scan(); const current = pages.find(page => page.path === currentPath);
+      graphIndex = new MarkdGraph.GraphIndex(pages);
+      if (!current) { saveState.textContent = 'Page removed'; return; }
+      state.graphPage = current;
+      if (current.lastModified !== previousModified) {
+        state.graphDocument = MarkdGraph.parseDocument(current.content); restoreGraphCollapse();
+        renderGraphPage(); updateStats(); saveState.textContent = 'Reloaded'; toast('Page reloaded from disk');
+      } else renderReferences();
+    } catch {}
+  }
+  window.addEventListener('focus', checkExternalGraphPage);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkExternalGraphPage(); else if (state.graphMode) flushGraphSave(false); });
   markdWrap.addEventListener('dragover', event => { if ([...event.dataTransfer.items].some(item => item.kind === 'file')) event.preventDefault(); });
   markdWrap.addEventListener('drop', async event => {
     const file = [...event.dataTransfer.files].find(item => /\.(md|markdown|txt)$/i.test(item.name));
@@ -1314,6 +1893,16 @@ Open, save, export, and reach recent documents or headings from the command pale
   docs = getStoredDocs();
   if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
   else loadMarkdown(starter, 'Welcome');
+
+  (async () => {
+    try {
+      const restored = await MarkdGraph.GraphStore.restore();
+      if (!restored || !(await restored.ensurePermission(false))) return;
+      graphStore = restored; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
+      const lastPage = graphIndex.resolvePage(settings.lastGraphPage) || graphIndex.allPages()[0];
+      if (lastPage && !state.dirty) await loadGraphPage(lastPage);
+    } catch {}
+  })();
 
   if ('launchQueue' in window) {
     window.launchQueue.setConsumer(async launchParams => {

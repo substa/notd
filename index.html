@@ -12,6 +12,7 @@
 <body>
   <div id="app" class="app">
     <header class="titlebar">
+      <button id="graphName" class="graph-name" type="button" title="Graph pages" hidden></button>
       <div class="document-title">
         <input id="fileName" value="Untitled" aria-label="Document name" spellcheck="false">
         <span id="dirtyDot" class="dirty-dot" aria-label="Unsaved changes"></span>
@@ -31,6 +32,13 @@
 
       <div class="markd-wrap" id="markdWrap">
         <article id="editor" class="editor" contenteditable="true" spellcheck="true" aria-label="Editor Markdown"></article>
+        <article id="outliner" class="outliner" aria-label="Graph outliner" hidden>
+          <nav id="zoomBreadcrumb" class="zoom-breadcrumb" aria-label="Block breadcrumb" hidden></nav>
+          <div id="pagePreamble" class="page-preamble" hidden></div>
+          <div id="blockTree" class="block-tree"></div>
+          <button id="addBlock" class="add-block" type="button">Add block</button>
+          <section id="references" class="references"></section>
+        </article>
         <textarea id="sourceEditor" class="source-editor" spellcheck="false" aria-label="Markdown source" hidden></textarea>
       </div>
 
@@ -69,10 +77,12 @@
         <div id="commandList" class="command-list" role="listbox"></div>
       </div>
     </div>
+    <div id="graphAutocomplete" class="graph-autocomplete" role="listbox" hidden></div>
     <div id="toast" class="toast" role="status"></div>
     <input id="fileInput" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
   </div>
   <noscript>This application requires JavaScript.</noscript>
+  <script src="graph.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
