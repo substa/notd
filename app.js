@@ -205,9 +205,10 @@ Open, save, export, and reach recent documents or headings from the command pale
       (_, alt, url, title) => `<img src="${safeUrl(url)}" alt="${alt}"${title ? ` title="${title}"` : ''}>`);
     value = value.replace(/\[([^\]]+)\]\(([^\s)]+)(?:\s+["']([^"']*)["'])?\)/g,
       (_, label, url, title) => `<a href="${safeUrl(url)}"${title ? ` title="${title}"` : ''}>${label}</a>`);
-    value = value.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, '<strong>$1$2</strong>');
+    value = value.replace(/\*\*\*([^*\n]+)\*\*\*|___([^_\n]+)___/g, '<strong><em>$1$2</em></strong>');
+    value = value.replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, '<strong>$1$2</strong>');
     value = value.replace(/~~([^~]+)~~/g, '<s>$1</s>');
-    value = value.replace(/(^|[^*])\*([^*\n]+)\*|(^|[^_])_([^_\n]+)_/g, (_, a, b, c, d) => `${a || c}<em>${b || d}</em>`);
+    value = value.replace(/(^|[^*])\*([^*\n]+)\*|(^|[^_])_([^_\n]+)_/g, (_, a, b, c, d) => `${a ?? c ?? ''}<em>${b ?? d}</em>`);
     value = value.replace(/ {2}$/g, '<br>');
     value = value.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)]);
     return value;
@@ -456,13 +457,24 @@ Open, save, export, and reach recent documents or headings from the command pale
         continue;
       }
       const opening = fenceOpening(lines[index]);
-      if (!opening) { text.push(lines[index]); index++; continue; }
-      flushText();
-      const code = [];
-      index++;
-      while (index < lines.length && !fenceClosing(lines[index], opening.marker)) code.push(lines[index++]);
-      if (index < lines.length) index++;
-      html.push(highlightedCodeBlock(code.join('\n'), opening.language));
+      if (opening) {
+        flushText();
+        const code = [];
+        index++;
+        while (index < lines.length && !fenceClosing(lines[index], opening.marker)) code.push(lines[index++]);
+        if (index < lines.length) index++;
+        html.push(highlightedCodeBlock(code.join('\n'), opening.language));
+        continue;
+      }
+      const heading = lines[index].match(/^\s*(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/);
+      if (heading) {
+        flushText();
+        const level = heading[1].length;
+        html.push(`<h${level} class="graph-heading">${graphTextHtml(heading[2], block)}</h${level}>`);
+        index++;
+        continue;
+      }
+      text.push(lines[index]); index++;
     }
     flushText();
     return html.join('');
@@ -546,7 +558,10 @@ Open, save, export, and reach recent documents or headings from the command pale
         const bullet = document.createElement('button');
         bullet.className = 'block-bullet'; bullet.type = 'button'; bullet.dataset.blockBullet = block.id;
         bullet.setAttribute('aria-label', 'Zoom into block');
-        row.append(toggle, bullet, graphContentElement(block, page)); node.append(row);
+        const blockContent = graphContentElement(block, page);
+        const firstHeading = blockContent.firstElementChild;
+        if (firstHeading?.classList.contains('graph-heading')) row.classList.add('graph-heading-row', `graph-heading-row-${firstHeading.tagName.slice(1)}`);
+        row.append(toggle, bullet, blockContent); node.append(row);
         if (block.children.length) {
           const children = document.createElement('div'); children.className = 'block-children'; children.append(renderBlocks(block.children, page)); node.append(children);
         }
