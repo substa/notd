@@ -12,6 +12,7 @@
   const references = $('#references');
   const graphName = $('#graphName');
   const graphAutocomplete = $('#graphAutocomplete');
+  const journalDatePicker = $('#journalDatePicker');
   const fileName = $('#fileName');
   const fileInput = $('#fileInput');
   const saveState = $('#saveState');
@@ -21,8 +22,12 @@
   let state = {
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
     vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
-    graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false
+    graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
+    journalMode: false, journalLimit: 8
   };
+  let journalDocuments = new Map();
+  let graphHistory = [];
+  let graphHistoryIndex = -1;
   let graphStore = null;
   let graphIndex = null;
   let activeGraphBlock = null;
@@ -291,10 +296,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     return result;
   }
 
-  function restoreGraphCollapse() {
+  function restoreGraphCollapse(document = state.graphDocument, page = state.graphPage) {
     let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
-    const collapsed = new Set(settings.graphCollapsed?.[state.graphPage?.path] || []);
-    MarkdGraph.flattenBlocks(state.graphDocument?.blocks).forEach(({ block }) => { block.collapsed = collapsed.has(block.id); });
+    const collapsed = new Set(settings.graphCollapsed?.[page?.path] || []);
+    MarkdGraph.flattenBlocks(document?.blocks).forEach(({ block }) => { block.collapsed = collapsed.has(block.id); });
   }
 
   function saveGraphCollapse() {
@@ -327,29 +332,48 @@ Open, save, export, and reach recent documents or headings from the command pale
     return html;
   }
 
-  function graphContentElement(block) {
+  function graphContentElement(block, page = state.graphPage) {
     const content = document.createElement('div');
     content.className = 'graph-block-content';
-    content.dataset.blockId = block.id;
+    content.dataset.blockId = block.id; content.dataset.pagePath = page?.path || '';
     content.innerHTML = graphDisplayContent(block);
-    if (graphStore && state.graphPage) {
+    if (graphStore && page) {
       $$('img', content).forEach(image => {
         const source = image.getAttribute('src');
-        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, state.graphPage.folder).then(url => { if (image.isConnected) image.src = url; }).catch(() => {});
+        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, page.folder).then(url => { if (image.isConnected) image.src = url; }).catch(() => {});
       });
     }
     return content;
   }
 
+  function orderedJournalPages() {
+    if (!graphStore) return [];
+    const today = MarkdGraph.journalInfo(new Date(), graphStore.config).date;
+    return graphStore.pages.filter(page => page.journal)
+      .sort((a, b) => {
+        if (a.journalDate === today) return -1; if (b.journalDate === today) return 1;
+        return (b.journalDate || b.name).localeCompare(a.journalDate || a.name);
+      });
+  }
+
+  function cachedJournalDocument(page) {
+    if (page.path === state.graphPage?.path) return state.graphDocument;
+    if (!journalDocuments.has(page.path)) {
+      const document = MarkdGraph.parseDocument(page.content); restoreGraphCollapse(document, page);
+      journalDocuments.set(page.path, document);
+    }
+    return journalDocuments.get(page.path);
+  }
+
   function renderGraphPage() {
     if (!state.graphMode || !state.graphDocument) return;
     activeGraphBlock = null;
-    const renderBlocks = blocks => {
+    const renderBlocks = (blocks, page = state.graphPage) => {
       const fragment = document.createDocumentFragment();
       for (const block of blocks) {
         const node = document.createElement('div');
         node.className = `block-node${block.children.length ? ' has-children' : ''}${block.collapsed ? ' collapsed' : ''}`;
-        node.dataset.blockId = block.id;
+        node.dataset.blockId = block.id; node.dataset.pagePath = page?.path || '';
         const row = document.createElement('div'); row.className = 'block-row';
         let toggle;
         if (block.children.length) {
@@ -362,24 +386,47 @@ Open, save, export, and reach recent documents or headings from the command pale
         const bullet = document.createElement('button');
         bullet.className = 'block-bullet'; bullet.type = 'button'; bullet.dataset.blockBullet = block.id;
         bullet.setAttribute('aria-label', 'Zoom into block');
-        row.append(toggle, bullet, graphContentElement(block)); node.append(row);
+        row.append(toggle, bullet, graphContentElement(block, page)); node.append(row);
         if (block.children.length) {
-          const children = document.createElement('div'); children.className = 'block-children'; children.append(renderBlocks(block.children)); node.append(children);
+          const children = document.createElement('div'); children.className = 'block-children'; children.append(renderBlocks(block.children, page)); node.append(children);
         }
         fragment.append(node);
       }
       return fragment;
     };
-    let roots = state.graphDocument.blocks;
-    if (state.graphZoomId) roots = [graphBlockLocation(state.graphZoomId)?.block].filter(Boolean);
-    blockTree.replaceChildren(renderBlocks(roots));
+
+    const fragment = document.createDocumentFragment();
+    if (state.journalMode && !state.graphZoomId) {
+      const pages = orderedJournalPages().slice(0, state.journalLimit);
+      const today = MarkdGraph.journalInfo(new Date(), graphStore.config).date;
+      for (const page of pages) {
+        const journalDocument = cachedJournalDocument(page); const section = document.createElement('section');
+        section.className = `journal-entry${page.path === state.graphPage.path ? ' active' : ''}${page.journalDate === today ? ' today' : ''}`; section.dataset.journalPath = page.path;
+        const heading = document.createElement('button'); heading.type = 'button'; heading.className = 'journal-heading';
+        heading.dataset.journalPage = page.path; heading.textContent = page.title; section.append(heading);
+        const preamble = journalDocument.preamble.join('\n').trim();
+        if (preamble) { const properties = document.createElement('div'); properties.className = 'journal-preamble'; properties.textContent = preamble; section.append(properties); }
+        const tree = document.createElement('div'); tree.className = 'journal-blocks'; tree.append(renderBlocks(journalDocument.blocks, page)); section.append(tree); fragment.append(section);
+      }
+      if (pages.length < orderedJournalPages().length) {
+        const more = document.createElement('div'); more.className = 'journal-more'; more.dataset.journalMore = ''; fragment.append(more);
+      }
+    } else {
+      let roots = state.graphDocument.blocks;
+      if (state.graphZoomId) roots = [graphBlockLocation(state.graphZoomId)?.block].filter(Boolean);
+      fragment.append(renderBlocks(roots));
+    }
+    blockTree.replaceChildren(fragment);
     const preamble = $('#pagePreamble');
     const preambleText = state.graphDocument.preamble.join('\n').trim();
-    preamble.hidden = !preambleText; preamble.textContent = preambleText;
+    preamble.hidden = state.journalMode || !preambleText; preamble.textContent = preambleText;
     const breadcrumb = $('#zoomBreadcrumb');
     breadcrumb.hidden = !state.graphZoomId;
     breadcrumb.innerHTML = state.graphZoomId ? `<button type="button" data-clear-zoom>${escapeHtml(state.graphPage?.title || 'Page')}</button> / Block` : '';
     renderReferences();
+    if (state.journalMode && !state.graphZoomId && state.journalLimit < orderedJournalPages().length) requestAnimationFrame(() => {
+      if (state.journalMode && markdWrap.scrollHeight <= markdWrap.clientHeight + 80) { state.journalLimit += 8; renderGraphPage(); }
+    });
   }
 
   function resizeGraphEditor(field) {
@@ -388,17 +435,19 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function commitGraphBlock() {
     if (!activeGraphBlock) return;
-    const { block, field } = activeGraphBlock;
+    const { block, field, page } = activeGraphBlock;
+    if (state.vimEnabled && state.vimMode === 'insert') finishVimInsertChange(field);
     activeGraphBlock = null;
+    if (state.vimEnabled) { state.vimMode = 'normal'; vimPending = ''; vimDesiredColumn = null; updateVimUi(); }
     hideGraphAutocomplete();
-    if (field.isConnected) field.replaceWith(graphContentElement(block));
+    if (field.isConnected) field.replaceWith(graphContentElement(block, page));
   }
 
-  function activateGraphBlock(block, position = null) {
+  function activateGraphBlock(block, position = null, page = state.graphPage) {
     if (!block || state.sourceMode) return;
     if (activeGraphBlock?.block === block) return activeGraphBlock.field.focus();
     commitGraphBlock();
-    const content = $$('.graph-block-content', blockTree).find(element => element.dataset.blockId === block.id);
+    const content = $$('.graph-block-content', blockTree).find(element => element.dataset.blockId === block.id && element.dataset.pagePath === (page?.path || ''));
     if (!content) return;
     const field = document.createElement('textarea');
     field.className = 'graph-block-editor'; field.spellcheck = true; field.value = block.content;
@@ -408,9 +457,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     field.addEventListener('blur', () => setTimeout(() => {
       if (activeGraphBlock?.field === field && $('#commandPalette').hidden && !graphAutocomplete.contains(document.activeElement)) commitGraphBlock();
     }));
-    content.replaceWith(field); activeGraphBlock = { block, field }; resizeGraphEditor(field);
+    field.dataset.pagePath = page?.path || '';
+    content.replaceWith(field); activeGraphBlock = { block, field, page }; resizeGraphEditor(field);
     const caret = position === null ? field.value.length : Math.max(0, Math.min(position, field.value.length));
     field.focus({ preventScroll: true }); field.setSelectionRange(caret, caret);
+    if (state.vimEnabled) setVimMode(state.vimMode, field, caret);
   }
 
   function focusGraphBlock(id, position = null) {
@@ -421,7 +472,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       const field = activeGraphBlock?.block?.id === id ? activeGraphBlock.field : null;
       if (!field) return false;
       const caret = position === null ? field.value.length : Math.max(0, Math.min(position, field.value.length));
-      field.focus({ preventScroll: true }); field.setSelectionRange(caret, caret);
+      field.focus({ preventScroll: true });
+      if (state.vimEnabled && state.vimMode === 'normal') showVimCursor(field, caret); else field.setSelectionRange(caret, caret);
       return true;
     };
     focus();
@@ -487,9 +539,38 @@ Open, save, export, and reach recent documents or headings from the command pale
     const result = await graphSaving; graphSaving = null; return result;
   }
 
+  function updateCurrentHistoryPosition() {
+    const entry = graphHistory[graphHistoryIndex];
+    if (!entry || entry.path !== state.graphPage?.path) return;
+    entry.scrollTop = markdWrap.scrollTop; entry.blockId = state.graphZoomId || null; entry.journalMode = state.journalMode;
+  }
+
+  function recordGraphHistory(page, options) {
+    if (options.historyNavigation) return;
+    updateCurrentHistoryPosition();
+    const entry = { path: page.path, title: page.title, journalMode: Boolean(options.journalMode), blockId: options.blockId || null, scrollTop: 0 };
+    const current = graphHistory[graphHistoryIndex];
+    if (current && current.path === entry.path && current.journalMode === entry.journalMode && current.blockId === entry.blockId) return;
+    graphHistory = graphHistory.slice(0, graphHistoryIndex + 1); graphHistory.push(entry); graphHistoryIndex = graphHistory.length - 1;
+  }
+
+  async function navigateGraphHistory(direction) {
+    if (!state.graphMode) return;
+    updateCurrentHistoryPosition();
+    const targetIndex = graphHistoryIndex + direction; const entry = graphHistory[targetIndex];
+    if (!entry) return toast(direction < 0 ? 'No previous page' : 'No next page');
+    const page = graphStore.pages.find(item => item.path === entry.path) || graphIndex.resolvePage(entry.title);
+    if (!page) return toast('Page no longer exists');
+    await loadGraphPage(page, { journalMode: entry.journalMode, blockId: entry.blockId, historyNavigation: true });
+    if (state.graphPage?.path !== page.path || state.journalMode !== entry.journalMode) return;
+    graphHistoryIndex = targetIndex;
+    requestAnimationFrame(() => { markdWrap.scrollTop = entry.scrollTop || 0; });
+  }
+
   async function loadGraphPage(pageOrTitle, options = {}) {
     if (!graphStore || !graphIndex) return;
     if (state.graphMode && state.dirty && !(await flushGraphSave(true))) return;
+    if (state.journalMode && state.graphPage && state.graphDocument) journalDocuments.set(state.graphPage.path, state.graphDocument);
     let page = typeof pageOrTitle === 'string' ? graphIndex.resolvePage(pageOrTitle) : pageOrTitle;
     if (!page && typeof pageOrTitle === 'string' && options.create !== false) {
       page = await graphStore.createPage(pageOrTitle, options);
@@ -499,18 +580,23 @@ Open, save, export, and reach recent documents or headings from the command pale
     const draft = await MarkdGraph.getDraft(page.path).catch(() => null);
     const content = draft?.content ?? page.content;
     const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
+    recordGraphHistory(page, options);
     state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
+    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 8 : state.journalLimit;
+    if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
     activeSourceBlock = null; activeGraphBlock = null;
+    vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null; state.vimMode = 'normal';
     editor.hidden = true; sourceEditor.hidden = true; outliner.hidden = false;
-    app.classList.add('graph-mode'); app.classList.toggle('dirty', Boolean(draft));
-    graphName.hidden = false; graphName.textContent = graphStore.name; $('#vimStatus').hidden = true;
-    fileName.value = page.title; document.title = `${page.title} — ${graphStore.name} — markd`;
+    app.classList.add('graph-mode'); app.classList.toggle('journal-mode', state.journalMode); app.classList.toggle('dirty', Boolean(draft));
+    graphName.hidden = false; graphName.textContent = graphStore.name; updateVimUi();
+    fileName.value = page.title; fileName.readOnly = Boolean(page.journal); document.title = `${page.title} — ${graphStore.name} — markd`;
     saveSettings({ lastGraphPage: page.title });
     renderGraphPage(); updateStats();
     saveState.textContent = draftConflict ? 'Recovery conflict' : (draft ? 'Recovered draft' : 'Ready');
     requestAnimationFrame(() => {
       if (options.blockId) blockTree.querySelector(`[data-block-id="${CSS.escape(options.blockId)}"]`)?.scrollIntoView({ block: 'center' });
+      if (state.vimEnabled) focusVimEditor();
     });
   }
 
@@ -520,43 +606,64 @@ Open, save, export, and reach recent documents or headings from the command pale
       saveState.textContent = 'Opening graph…';
       graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open();
       const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
-      let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
-      const initial = graphIndex.resolvePage(settings.lastGraphPage) || graphIndex.allPages()[0];
-      if (initial) await loadGraphPage(initial);
-      else await loadGraphPage('Home', { create: true });
+      journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true);
       toast(`Opened ${graphStore.name}`);
     } catch (error) { if (error.name !== 'AbortError') toast(error.message || 'Could not open the graph'); }
   }
 
-  async function openToday() {
+  async function openJournalDate(date, options = {}) {
     if (!graphStore) return openGraph();
-    const journal = MarkdGraph.journalInfo();
-    let page = graphIndex.resolvePage(journal.title) || graphStore.pages.find(item => item.journal && item.name === `${journal.filename}.md`);
+    const journal = MarkdGraph.journalInfo(date, graphStore.config);
+    let page = graphStore.pages.find(item => item.journalDate === journal.date) || graphIndex.resolvePage(journal.title);
     if (!page) {
-      page = await graphStore.createPage(journal.title, { journal: true, filename: journal.filename });
+      page = await graphStore.createPage(journal.title, { journal: true, journalDate: journal.value, filename: journal.filename });
       graphIndex.rebuild(graphStore.pages);
     }
-    loadGraphPage(page);
+    await loadGraphPage(page, { journalMode: true, resetJournalLimit: Boolean(options.reset) });
+    const index = orderedJournalPages().findIndex(item => item.path === page.path);
+    if (index >= state.journalLimit) { state.journalLimit = index + 1; renderGraphPage(); }
+    requestAnimationFrame(() => {
+      const entry = blockTree.querySelector(`[data-journal-path="${CSS.escape(page.path)}"]`);
+      if (options.reset) markdWrap.scrollTop = 0; else entry?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      if (state.vimEnabled) focusVimEditor();
+    });
+    return page;
+  }
+
+  function relativeJournalDate(days) {
+    const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + days); return date;
+  }
+
+  function openJournalDatePicker() {
+    journalDatePicker.value = MarkdGraph.journalInfo(new Date(), graphStore?.config).date;
+    try { if (journalDatePicker.showPicker) journalDatePicker.showPicker(); else journalDatePicker.click(); }
+    catch { journalDatePicker.click(); }
+  }
+
+  async function openToday(reset = false) {
+    return openJournalDate(new Date(), { reset });
   }
 
   async function closeGraph() {
     if (state.dirty && !(await flushGraphSave(true))) return;
     graphStore?.disposeAssets();
-    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null;
-    outliner.hidden = true; graphName.hidden = true; app.classList.remove('graph-mode');
+    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1;
+    outliner.hidden = true; graphName.hidden = true; app.classList.remove('graph-mode', 'journal-mode');
     const docs = getStoredDocs();
     if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
     else loadMarkdown('', 'Untitled');
   }
 
   function renderReferences(includeUnlinked = false) {
-    if (!state.graphMode || !graphIndex || !state.graphPage) { references.innerHTML = ''; return; }
+    if (!state.graphMode || !graphIndex || !state.graphPage || (state.journalMode && !state.graphZoomId)) { references.innerHTML = ''; return; }
     const renderGroups = items => {
       const groups = new Map();
       items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
       return [...groups].map(([title, group]) => `<div class="reference-group"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${escapeHtml(item.content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220))}</button>`).join('')}</div>`).join('');
     };
-    const linked = graphIndex.referencesToPage(state.graphPage.title);
+    const aggregatePages = new Set(['home', 'journals', "today's journal", "today's journals", 'todays journal', 'todays journals', 'today journal']);
+    const linked = graphIndex.referencesToPage(state.graphPage.title)
+      .filter(item => !aggregatePages.has(MarkdGraph.normalizePage(item.page.title)));
     const zoomedBlock = state.graphZoomId ? graphBlockLocation(state.graphZoomId)?.block : null;
     const blockUuid = zoomedBlock && MarkdGraph.propertiesFrom(zoomedBlock.content).id;
     const blockLinked = blockUuid ? graphIndex.referencesToBlock(blockUuid) : [];
@@ -626,6 +733,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
     const block = location.block;
     if (handleWikiPair(event)) return;
+    if (event.key === '/' && !event.metaKey && !event.ctrlKey && field.value.slice(0, field.selectionStart).split('\n').pop().trim() === '') {
+      event.preventDefault(); showCommandPalette('/'); return;
+    }
     if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
       event.preventDefault(); handleGraphAutocompleteKey(event.key); return;
     }
@@ -738,6 +848,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function vimField() {
+    if (activeGraphBlock?.field?.isConnected) return activeGraphBlock.field;
     if (activeSourceBlock?.isConnected) return activeSourceBlock;
     return state.sourceMode ? sourceEditor : null;
   }
@@ -746,6 +857,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     return {
       markdown: currentMarkdown(),
       blockIndex: field === activeSourceBlock ? [...editor.children].indexOf(field) : 0,
+      blockId: field === activeGraphBlock?.field ? activeGraphBlock.block.id : null,
+      graphBlockIndex: field === activeGraphBlock?.field ? MarkdGraph.flattenBlocks(state.graphDocument?.blocks).findIndex(({ block }) => block === activeGraphBlock.block) : 0,
       cursor: field?.selectionStart || 0
     };
   }
@@ -779,6 +892,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (state.sourceMode) {
       sourceEditor.value = snapshot.markdown;
       setVimMode('normal', sourceEditor, snapshot.cursor);
+    } else if (state.graphMode) {
+      activeGraphBlock = null; state.graphDocument = MarkdGraph.parseDocument(snapshot.markdown); restoreGraphCollapse();
+      renderGraphPage(); graphChanged();
+      const block = graphBlockLocation(snapshot.blockId)?.block || MarkdGraph.flattenBlocks(state.graphDocument.blocks)[snapshot.graphBlockIndex]?.block || state.graphDocument.blocks[0];
+      if (block) focusGraphBlock(block.id, snapshot.cursor);
     } else {
       activeSourceBlock = null;
       editor.innerHTML = markdownToHtml(snapshot.markdown);
@@ -809,6 +927,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function showVimCursor(field, position = field.selectionStart) {
     if (!field?.isConnected) return;
+    field.classList.toggle('vim-empty', field.value.length === 0);
     const maximum = field.value.endsWith('\n') ? field.value.length : Math.max(0, field.value.length - 1);
     const cursor = Math.max(0, Math.min(position, maximum));
     field.setSelectionRange(cursor, Math.min(cursor + 1, field.value.length));
@@ -828,7 +947,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     state.vimMode = mode;
     vimPending = '';
     vimDesiredColumn = null;
-    $$('.md-source-block, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert'));
+    $$('.md-source-block, .graph-block-editor, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert', 'vim-empty'));
     if (field?.isConnected) {
       field.classList.add(mode === 'normal' ? 'vim-normal' : 'vim-insert');
       field.focus();
@@ -844,6 +963,12 @@ Open, save, export, and reach recent documents or headings from the command pale
   function focusVimEditor() {
     if (!state.vimEnabled) return;
     if (state.sourceMode) { setVimMode(state.vimMode, sourceEditor); return; }
+    if (state.graphMode) {
+      if (activeGraphBlock?.field) { setVimMode(state.vimMode, activeGraphBlock.field); return; }
+      const block = (state.graphZoomId && graphBlockLocation(state.graphZoomId)?.block) || state.graphDocument?.blocks?.[0];
+      if (block) activateGraphBlock(block, 0, state.graphPage);
+      return;
+    }
     if (activeSourceBlock) { setVimMode(state.vimMode, activeSourceBlock); return; }
     let block = editor.firstElementChild;
     if (!block) {
@@ -857,7 +982,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     state.vimEnabled = enabled;
     state.vimMode = 'normal';
     vimPending = '';
-    $$('.md-source-block, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert'));
+    $$('.md-source-block, .graph-block-editor, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert', 'vim-empty'));
     updateVimUi();
     saveSettings({ vimEnabled: enabled });
     if (enabled && refocus) requestAnimationFrame(focusVimEditor);
@@ -866,7 +991,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       if (field) {
         field.setSelectionRange(field.selectionStart, field.selectionStart);
         if (refocus) field.focus();
-      } else if (refocus) editor.focus();
+      } else if (refocus) (state.graphMode ? outliner : editor).focus();
     }
     if (refocus) toast(enabled ? 'Vim mode enabled' : 'Vim mode disabled');
   }
@@ -910,6 +1035,33 @@ Open, save, export, and reach recent documents or headings from the command pale
     return cursor;
   }
 
+  function vimGraphEntries() {
+    if (state.journalMode && !state.graphZoomId) {
+      return orderedJournalPages().slice(0, state.journalLimit).flatMap(page =>
+        visibleGraphBlocks(cachedJournalDocument(page).blocks, []).map(block => ({ block, page }))
+      );
+    }
+    const roots = state.graphZoomId ? [graphBlockLocation(state.graphZoomId)?.block].filter(Boolean) : state.graphDocument?.blocks || [];
+    return visibleGraphBlocks(roots, []).map(block => ({ block, page: state.graphPage }));
+  }
+
+  function moveVimToGraphBlock(direction, distance = 1, preferredColumn = 0) {
+    let entries = vimGraphEntries(); const current = activeGraphBlock?.block; const currentPage = activeGraphBlock?.page;
+    let index = entries.findIndex(entry => entry.block === current && entry.page.path === currentPage?.path);
+    if (index < 0) return;
+    if (state.journalMode && direction > 0 && index + distance >= entries.length && state.journalLimit < orderedJournalPages().length) {
+      state.journalLimit += 8; entries = vimGraphEntries();
+      index = entries.findIndex(entry => entry.block === current && entry.page.path === currentPage?.path);
+    }
+    const target = entries[Math.max(0, Math.min(entries.length - 1, index + direction * distance))];
+    if (!target || (target.block === current && target.page.path === currentPage?.path)) return;
+    const lines = target.block.content.split('\n'); const lineIndex = direction < 0 ? lines.length - 1 : 0;
+    const start = lines.slice(0, lineIndex).reduce((total, line) => total + line.length + 1, 0);
+    const position = start + Math.min(preferredColumn, Math.max(0, lines[lineIndex].length - 1));
+    if (target.page.path === state.graphPage?.path) focusGraphBlock(target.block.id, position);
+    else activateJournalBlock(target.page.path, target.block.id, 'edit', position);
+  }
+
   function moveVimVertically(field, direction, firstNonBlank = false) {
     const bounds = vimLineBounds(field);
     const column = vimDesiredColumn ?? field.selectionStart - bounds.start;
@@ -917,14 +1069,16 @@ Open, save, export, and reach recent documents or headings from the command pale
     let targetStart;
     if (direction < 0) {
       if (bounds.start === 0) {
-        if (field === activeSourceBlock) moveToAdjacentBlock(-1, false, column);
+        if (field === activeGraphBlock?.field) moveVimToGraphBlock(-1, 1, column);
+        else if (field === activeSourceBlock) moveToAdjacentBlock(-1, false, column);
         return;
       }
       const previousEnd = bounds.start - 1;
       targetStart = field.value.lastIndexOf('\n', Math.max(0, previousEnd - 1)) + 1;
     } else {
       if (bounds.end === field.value.length) {
-        if (field === activeSourceBlock) moveToAdjacentBlock(1, false, column);
+        if (field === activeGraphBlock?.field) moveVimToGraphBlock(1, 1, column);
+        else if (field === activeSourceBlock) moveToAdjacentBlock(1, false, column);
         return;
       }
       targetStart = bounds.end + 1;
@@ -949,6 +1103,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       showVimCursor(field, lineStart + Math.min(column, Math.max(0, lines[targetLine].length - 1)));
       centerCaret(); return;
     }
+    if (field === activeGraphBlock?.field) { moveVimToGraphBlock(direction, 5, column); return; }
     const blocks = [...editor.children];
     const currentIndex = blocks.indexOf(activeSourceBlock);
     if (currentIndex < 0) return;
@@ -969,6 +1124,13 @@ Open, save, export, and reach recent documents or headings from the command pale
       const position = end ? vimLineBounds(field, field.value.length).start : 0;
       showVimCursor(field, position); centerCaret(); return;
     }
+    if (field === activeGraphBlock?.field) {
+      const entries = vimGraphEntries(); const target = end ? entries.at(-1) : entries[0]; if (!target) return;
+      const position = end ? Math.max(0, target.block.content.lastIndexOf('\n') + 1) : 0;
+      if (target.page.path === state.graphPage?.path) focusGraphBlock(target.block.id, position);
+      else activateJournalBlock(target.page.path, target.block.id, 'edit', position);
+      return;
+    }
     const source = activeSourceBlock;
     if (!source) return;
     const target = end ? editor.lastElementChild : editor.firstElementChild;
@@ -980,6 +1142,29 @@ Open, save, export, and reach recent documents or headings from the command pale
       showVimCursor(activeSourceBlock, position);
       activeSourceBlock.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
+  }
+
+  function createVimGraphBlock(before = false) {
+    const block = activeGraphBlock?.block; const location = block && graphBlockLocation(block.id); if (!location) return;
+    vimInsertSnapshot = captureVimSnapshot(activeGraphBlock.field);
+    let next;
+    if (!before) next = createNextGraphBlock(block);
+    else {
+      next = { id: MarkdGraph.newId(), uuid: null, content: '', marker: block.marker || '-', children: [], collapsed: false };
+      if (state.graphZoomId === block.id) { block.collapsed = false; block.children.unshift(next); }
+      else location.blocks.splice(location.index, 0, next);
+      graphMutationFocus(next, 0);
+    }
+    if (next && activeGraphBlock?.field) setVimMode('insert', activeGraphBlock.field, 0);
+  }
+
+  function deleteVimGraphBlock(field) {
+    const block = activeGraphBlock?.block; const location = block && graphBlockLocation(block.id); if (!location) return;
+    const pageBlocks = MarkdGraph.flattenBlocks(state.graphDocument.blocks).map(entry => entry.block);
+    if (pageBlocks.length <= 1) { replaceVimRange(field, 0, field.value.length); return; }
+    const index = pageBlocks.indexOf(block); recordVimChange(field);
+    const target = pageBlocks[index + 1] || pageBlocks[index - 1]; location.blocks.splice(location.index, 1);
+    graphChanged(); if (target) focusGraphBlock(target.id, 0); else renderGraphPage();
   }
 
   function deleteVimLine(field) {
@@ -1004,7 +1189,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     if (vimPending === 'd') {
       vimPending = '';
-      if (key === 'd') deleteVimLine(field);
+      if (key === 'd') field === activeGraphBlock?.field ? deleteVimGraphBlock(field) : deleteVimLine(field);
       else if (key === 'w') { replaceVimRange(field, position, nextVimWord(value, position)); showVimCursor(field, position); }
       else if (key === '$') { replaceVimRange(field, position, bounds.end); showVimCursor(field, position); }
       updateVimUi(); return;
@@ -1041,10 +1226,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     else if (key === 'I') setVimMode('insert', field, bounds.start + (value.slice(bounds.start, bounds.end).match(/^\s*/)?.[0].length || 0));
     else if (key === 'A') setVimMode('insert', field, bounds.end);
     else if (key === 'o' || key === 'O') {
-      const insertion = key === 'o' ? bounds.end : bounds.start;
-      vimInsertSnapshot = captureVimSnapshot(field);
-      replaceVimRange(field, insertion, insertion, '\n', false);
-      setVimMode('insert', field, key === 'o' ? insertion + 1 : insertion);
+      if (field === activeGraphBlock?.field) createVimGraphBlock(key === 'O');
+      else {
+        const insertion = key === 'o' ? bounds.end : bounds.start;
+        vimInsertSnapshot = captureVimSnapshot(field);
+        replaceVimRange(field, insertion, insertion, '\n', false);
+        setVimMode('insert', field, key === 'o' ? insertion + 1 : insertion);
+      }
     } else if (key === 'x' || key === 'Delete') {
       if (position < value.length && value[position] !== '\n') replaceVimRange(field, position, position + 1);
       showVimCursor(field, Math.min(position, field.value.length - 1));
@@ -1063,7 +1251,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function handleVimKeydown(event) {
     if (!state.vimEnabled || !$('#commandPalette').hidden || !$('#confirmDialog').hidden) return;
-    const field = event.target === sourceEditor ? sourceEditor : (event.target === activeSourceBlock ? activeSourceBlock : null);
+    const field = event.target === sourceEditor ? sourceEditor : (event.target === activeGraphBlock?.field ? activeGraphBlock.field : (event.target === activeSourceBlock ? activeSourceBlock : null));
     const ctrlEscape = event.ctrlKey && event.key === '[';
     const ctrlCommand = event.ctrlKey && !event.metaKey && !event.altKey && ['d', 'u', 'r'].includes(event.key.toLowerCase());
     const vimKey = ctrlCommand ? `Ctrl+${event.key.toLowerCase()}` : event.key;
@@ -1078,7 +1266,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     const handledKey = event.key.length === 1 || ['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'Backspace', 'Delete'].includes(event.key);
     if (!handledKey) return;
-    if (!field && (event.target === editor || editor.contains(event.target))) {
+    if (!field && (event.target === editor || editor.contains(event.target) || (state.graphMode && (event.target === outliner || outliner.contains(event.target))))) {
       event.preventDefault(); event.stopImmediatePropagation();
       focusVimEditor();
       requestAnimationFrame(() => { const active = vimField(); if (active && event.key !== 'Escape') processVimNormalKey(active, vimKey); });
@@ -1104,7 +1292,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       event.preventDefault(); event.stopPropagation(); moveToAdjacentBlock(1, true); return;
     }
     if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && source.value.slice(0, start).split('\n').pop().trim() === '') {
-      event.preventDefault(); event.stopPropagation(); showCommandPalette(); return;
+      event.preventDefault(); event.stopPropagation(); showCommandPalette('/'); return;
     }
     if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey) return;
     const currentLine = source.value.slice(0, start).split('\n').pop();
@@ -1162,9 +1350,9 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function loadMarkdown(markdown, name = 'Untitled', options = {}) {
-    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false;
+    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.graphConflict = false; state.sourceMode = false; state.journalMode = false;
     outliner.hidden = true; graphName.hidden = true; editor.hidden = false; sourceEditor.hidden = true;
-    app.classList.remove('graph-mode', 'source-mode'); updateVimUi();
+    app.classList.remove('graph-mode', 'journal-mode', 'source-mode'); updateVimUi();
     state.markdown = markdown;
     activeSourceBlock = null; activeGraphBlock = null;
     vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null;
@@ -1173,7 +1361,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     state.dirty = false;
     editor.innerHTML = markdownToHtml(markdown);
     sourceEditor.value = markdown;
-    fileName.value = name.replace(/\.(md|markdown|txt)$/i, '');
+    fileName.value = name.replace(/\.(md|markdown|txt)$/i, ''); fileName.readOnly = false;
     document.title = `${fileName.value} — markd`;
     app.classList.remove('dirty');
     updateStats(); updateOutline(); persistLocal(false);
@@ -1288,7 +1476,9 @@ Open, save, export, and reach recent documents or headings from the command pale
         sourceEditor.hidden = true; outliner.hidden = false; renderGraphPage(); graphChanged();
       }
       state.sourceMode = shouldEnable; app.classList.toggle('source-mode', shouldEnable);
-      updateStats(); (shouldEnable ? sourceEditor : outliner).focus?.(); return;
+      updateStats();
+      if (state.vimEnabled) requestAnimationFrame(focusVimEditor); else (shouldEnable ? sourceEditor : outliner).focus?.();
+      return;
     }
     if (shouldEnable) { commitActiveBlock(); sourceEditor.value = editorToMarkdown(); editor.hidden = true; sourceEditor.hidden = false; }
     else { editor.innerHTML = markdownToHtml(sourceEditor.value); sourceEditor.hidden = true; editor.hidden = false; }
@@ -1555,7 +1745,12 @@ Open, save, export, and reach recent documents or headings from the command pale
   const commands = [
     { label: 'Open local graph', keywords: 'folder logseq graph local', run: () => requestAction(openGraph) },
     { label: 'New graph page', keywords: 'page create graph', run: () => requestAction(createGraphPage) },
-    { label: 'Today journal', keywords: 'daily notes journal today', run: () => requestAction(openToday) },
+    { label: 'Today journal', shortcut: '⇧⌘ J', keywords: 'daily notes journal today', run: () => requestAction(openToday) },
+    { label: 'Previous page', shortcut: 'Alt ←', keywords: 'history back navigate', run: () => navigateGraphHistory(-1) },
+    { label: 'Next page', shortcut: 'Alt →', keywords: 'history forward navigate', run: () => navigateGraphHistory(1) },
+    { label: '/yesterday', keywords: 'journal previous day ieri', run: () => requestAction(() => openJournalDate(relativeJournalDate(-1))) },
+    { label: '/tomorrow', keywords: 'journal next day domani', run: () => requestAction(() => openJournalDate(relativeJournalDate(1))) },
+    { label: '/date picker', keywords: 'journal calendar choose select date', run: openJournalDatePicker },
     { label: 'Copy block reference', keywords: 'uuid block reference link', run: copyGraphBlockReference },
     { label: 'Zoom into block', keywords: 'focus block outliner', run: zoomGraphBlock },
     { label: 'Close graph', keywords: 'close folder graph', run: closeGraph },
@@ -1641,10 +1836,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     $('.command-item.selected')?.scrollIntoView({ block: 'nearest' });
   }
 
-  function showCommandPalette() {
+  function showCommandPalette(initialQuery = '') {
     const field = activeMarkdownField();
     paletteContext = field ? { field, start: field.selectionStart, end: field.selectionEnd } : null;
-    $('#commandPalette').hidden = false; $('#commandInput').value = ''; selectedCommand = 0; renderCommandList();
+    $('#commandPalette').hidden = false; $('#commandInput').value = initialQuery; selectedCommand = 0; renderCommandList();
     requestAnimationFrame(() => $('#commandInput').focus());
   }
 
@@ -1660,8 +1855,28 @@ Open, save, export, and reach recent documents or headings from the command pale
     closeCommandPalette(false); command.run(); paletteContext = null;
   }
 
+  async function activateJournalBlock(pagePath, blockId, action = 'edit', position = null) {
+    const page = graphStore?.pages.find(item => item.path === pagePath); if (!page) return;
+    if (page.path !== state.graphPage?.path) {
+      if (state.dirty && !(await flushGraphSave(true))) return;
+      await loadGraphPage(page, { journalMode: true });
+    }
+    const block = graphBlockLocation(blockId)?.block; if (!block) return;
+    if (action === 'toggle') { block.collapsed = !block.collapsed; saveGraphCollapse(); renderGraphPage(); return; }
+    if (action === 'task') { toggleGraphTask(block, false); return; }
+    if (action === 'zoom') { block.collapsed = false; saveGraphCollapse(); state.graphZoomId = block.id; focusGraphBlock(block.id); return; }
+    activateGraphBlock(block, position, page);
+  }
+
+  async function openSingleJournalPage(pagePath) {
+    const page = graphStore?.pages.find(item => item.path === pagePath); if (!page) return;
+    await loadGraphPage(page, { journalMode: false });
+    markdWrap.scrollTop = 0;
+  }
+
   async function renameGraphPage(title) {
     const page = state.graphPage; const nextTitle = title.trim();
+    if (page?.journal) { fileName.value = page.title; return; }
     if (!page || !nextTitle || nextTitle === page.title) { if (page) fileName.value = page.title; return; }
     try {
       commitGraphBlock();
@@ -1708,11 +1923,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!command) return;
     closeCommandPalette(false); command(); paletteContext = null;
   });
-  $('#commandButton').addEventListener('click', showCommandPalette);
+  $('#commandButton').addEventListener('click', () => showCommandPalette());
   document.addEventListener('keydown', handleVimKeydown, true);
   document.addEventListener('pointerup', event => {
     if (!state.vimEnabled || state.vimMode !== 'normal') return;
-    const field = event.target === sourceEditor ? sourceEditor : (event.target === activeSourceBlock ? activeSourceBlock : null);
+    const field = event.target === sourceEditor ? sourceEditor : (event.target === activeGraphBlock?.field ? activeGraphBlock.field : (event.target === activeSourceBlock ? activeSourceBlock : null));
     if (field) requestAnimationFrame(() => showVimCursor(field, field.selectionStart));
   });
   $('#commandInput').addEventListener('input', () => { selectedCommand = 0; renderCommandList(); });
@@ -1744,7 +1959,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (handleWikiPair(event)) return;
     const line = sourceEditor.value.slice(0, sourceEditor.selectionStart).split('\n').pop();
     if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !line.trim()) {
-      event.preventDefault(); showCommandPalette();
+      event.preventDefault(); showCommandPalette('/');
     }
   });
   editor.addEventListener('paste', event => {
@@ -1765,8 +1980,16 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
   });
   outliner.addEventListener('click', event => {
+    const journalHeading = event.target.closest('[data-journal-page]');
+    if (journalHeading) { openSingleJournalPage(journalHeading.dataset.journalPage); return; }
+    if (event.target.closest('[data-journal-more]')) { state.journalLimit += 8; renderGraphPage(); return; }
+    const blockNode = event.target.closest('.block-node'); const pagePath = blockNode?.dataset.pagePath;
     const task = event.target.closest('[data-task-block]');
-    if (task) { const block = graphBlockLocation(task.dataset.taskBlock)?.block; if (block) toggleGraphTask(block, false); return; }
+    if (task) {
+      if (state.journalMode && pagePath && pagePath !== state.graphPage.path) activateJournalBlock(pagePath, task.dataset.taskBlock, 'task');
+      else { const block = graphBlockLocation(task.dataset.taskBlock)?.block; if (block) toggleGraphTask(block, false); }
+      return;
+    }
     const pageLink = event.target.closest('[data-page]');
     if (pageLink) { event.preventDefault(); loadGraphPage(pageLink.dataset.page, { create: true }); return; }
     const blockReference = event.target.closest('[data-block-ref]');
@@ -1781,27 +2004,34 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (event.target.closest('[data-clear-zoom]')) { state.graphZoomId = null; renderGraphPage(); return; }
     const toggle = event.target.closest('[data-block-toggle]');
     if (toggle) {
-      const block = graphBlockLocation(toggle.dataset.blockToggle)?.block;
-      if (block) { block.collapsed = !block.collapsed; saveGraphCollapse(); renderGraphPage(); }
+      if (state.journalMode && pagePath && pagePath !== state.graphPage.path) activateJournalBlock(pagePath, toggle.dataset.blockToggle, 'toggle');
+      else { const block = graphBlockLocation(toggle.dataset.blockToggle)?.block; if (block) { block.collapsed = !block.collapsed; saveGraphCollapse(); renderGraphPage(); } }
       return;
     }
     const bullet = event.target.closest('[data-block-bullet]');
     if (bullet) {
-      const block = graphBlockLocation(bullet.dataset.blockBullet)?.block;
-      if (block) { commitGraphBlock(); block.collapsed = false; saveGraphCollapse(); state.graphZoomId = block.id; focusGraphBlock(block.id); }
+      if (state.journalMode && pagePath && pagePath !== state.graphPage.path) activateJournalBlock(pagePath, bullet.dataset.blockBullet, 'zoom');
+      else { const block = graphBlockLocation(bullet.dataset.blockBullet)?.block; if (block) { commitGraphBlock(); block.collapsed = false; saveGraphCollapse(); state.graphZoomId = block.id; focusGraphBlock(block.id); } }
       return;
     }
     const content = event.target.closest('.graph-block-content');
-    if (content && !event.target.closest('button,a')) activateGraphBlock(graphBlockLocation(content.dataset.blockId)?.block);
+    if (content && !event.target.closest('button,a')) {
+      if (state.journalMode && content.dataset.pagePath !== state.graphPage.path) activateJournalBlock(content.dataset.pagePath, content.dataset.blockId);
+      else activateGraphBlock(graphBlockLocation(content.dataset.blockId)?.block);
+    }
   });
   $('#addBlock').addEventListener('click', () => {
     const block = { id: MarkdGraph.newId(), uuid: null, content: '', marker: '-', children: [], collapsed: false };
     state.graphDocument.blocks.push(block); graphMutationFocus(block, 0);
   });
-  graphName.addEventListener('click', showCommandPalette);
+  graphName.addEventListener('click', () => showCommandPalette());
   graphAutocomplete.addEventListener('pointerdown', event => event.preventDefault());
   graphAutocomplete.addEventListener('click', event => {
     const item = event.target.closest('[data-autocomplete-index]'); if (item) chooseGraphAutocomplete(Number(item.dataset.autocompleteIndex));
+  });
+  journalDatePicker.addEventListener('change', () => {
+    const [year, month, day] = journalDatePicker.value.split('-').map(Number);
+    if (year && month && day) requestAction(() => openJournalDate(new Date(year, month - 1, day)));
   });
 
   function setTheme(theme) {
@@ -1825,6 +2055,10 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   document.addEventListener('keydown', event => {
     const mod = event.metaKey || event.ctrlKey; const key = event.key.toLowerCase();
+    if (state.graphMode && mod && event.shiftKey && key === 'j') { event.preventDefault(); requestAction(openToday); return; }
+    if (state.graphMode && event.altKey && !mod && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault(); navigateGraphHistory(event.key === 'ArrowLeft' ? -1 : 1); return;
+    }
     if (event.key === 'F2') { event.preventDefault(); commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); return; }
     if (event.key === '/' && !mod && !event.altKey && !activeSourceBlock && !state.sourceMode && (event.target === editor || editor.contains(event.target))) {
       event.preventDefault(); withMarkdownField(() => showCommandPalette()); return;
@@ -1861,15 +2095,27 @@ Open, save, export, and reach recent documents or headings from the command pale
       const pages = await graphStore.scan(); const current = pages.find(page => page.path === currentPath);
       graphIndex = new MarkdGraph.GraphIndex(pages);
       if (!current) { saveState.textContent = 'Page removed'; return; }
-      state.graphPage = current;
+      state.graphPage = current; journalDocuments.clear();
       if (current.lastModified !== previousModified) {
         state.graphDocument = MarkdGraph.parseDocument(current.content); restoreGraphCollapse();
-        renderGraphPage(); updateStats(); saveState.textContent = 'Reloaded'; toast('Page reloaded from disk');
-      } else renderReferences();
+        updateStats(); saveState.textContent = 'Reloaded'; toast('Page reloaded from disk');
+      }
+      if (state.journalMode) { journalDocuments.set(current.path, state.graphDocument); renderGraphPage(); }
+      else if (current.lastModified !== previousModified) renderGraphPage();
+      else renderReferences();
     } catch {}
   }
   window.addEventListener('focus', checkExternalGraphPage);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkExternalGraphPage(); else if (state.graphMode) flushGraphSave(false); });
+  let journalScrollLoading = false;
+  markdWrap.addEventListener('scroll', () => {
+    if (!state.journalMode || state.graphZoomId || activeGraphBlock || journalScrollLoading) return;
+    if (markdWrap.scrollTop + markdWrap.clientHeight < markdWrap.scrollHeight - 240) return;
+    if (state.journalLimit >= orderedJournalPages().length) return;
+    journalScrollLoading = true; const scrollTop = markdWrap.scrollTop;
+    state.journalLimit += 8; renderGraphPage(); markdWrap.scrollTop = scrollTop;
+    requestAnimationFrame(() => { journalScrollLoading = false; });
+  });
   markdWrap.addEventListener('dragover', event => { if ([...event.dataTransfer.items].some(item => item.kind === 'file')) event.preventDefault(); });
   markdWrap.addEventListener('drop', async event => {
     const file = [...event.dataTransfer.files].find(item => /\.(md|markdown|txt)$/i.test(item.name));
@@ -1899,8 +2145,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const restored = await MarkdGraph.GraphStore.restore();
       if (!restored || !(await restored.ensurePermission(false))) return;
       graphStore = restored; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
-      const lastPage = graphIndex.resolvePage(settings.lastGraphPage) || graphIndex.allPages()[0];
-      if (lastPage && !state.dirty) await loadGraphPage(lastPage);
+      if (!state.dirty) { journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openToday(true); }
     } catch {}
   })();
 

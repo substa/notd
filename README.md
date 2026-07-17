@@ -51,4 +51,6 @@ No content is sent to a server. Automatic document copies are stored in `localSt
 
 Use **Open local graph** from the command palette and select a folder. markd reads Markdown files at the graph root and under `pages/` and `journals/`. The graph index is rebuilt locally and supports Logseq-style page and block references. In the outliner, use `Enter` to add a sibling, `Shift+Enter` for a line break, `Tab`/`Shift+Tab` to change depth, `Alt+↑/↓` to reorder, and `⌘/Ctrl+Enter` to cycle task states. Click a bullet to zoom into it; use the small arrow to collapse or expand nested blocks.
 
+Opening a graph starts on today's Logseq-compatible journal. Existing journals are shown below it in reverse chronological order and loaded progressively while scrolling. From an empty block, use `/yesterday`, `/tomorrow`, or `/date picker` to open or create another journal date. Use `⌘/Ctrl+Shift+J` for today's journal and `Alt+←/→` to move backward or forward through page history. The journal filename and displayed date follow `:journal/file-name-format` and `:journal/page-title-format` from `logseq/config.edn` (default filename: `yyyy_MM_dd.md`).
+
 Direct directory access requires the File System Access API and currently works best in Chromium-based browsers. Other browsers can continue to use the single-document editor and download-based saving.
