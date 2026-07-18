@@ -426,6 +426,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       ? `<blockquote>${inlineMarkdown(value.split('\n').map(line => line.replace(/^\s*>\s?/, '')).join('\n')).replace(/\n/g, '<br>')}</blockquote>`
       : inlineMarkdown(value).replace(/\n/g, '<br>');
     html = html.replace(/^(TODO|DOING|DONE)\b/, status => `<button class="graph-task graph-task-${status.toLowerCase()}" data-task-block="${escapeHtml(block.id)}">${status}</button>`);
+    html = html.replace(/SCHEDULED:\s*&lt;([^&]+)&gt;/g, '<span class="graph-scheduled">Scheduled · $1</span>');
     html = html.replace(/\[\[([^\]]+?)\]\]/g, (_, target) => {
       const [page, alias] = target.split('|');
       return `<button class="graph-page-ref" data-page="${escapeHtml(page.trim())}">${alias ? escapeHtml(alias.trim()) : escapeHtml(page.trim())}</button>`;
@@ -997,6 +998,17 @@ Open, save, export, and reach recent documents or headings from the command pale
       const timestamp = creationTimestamp(page);
       return timestamp ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(timestamp) : '';
     };
+    const referenceSnippet = content => {
+      const value = content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220);
+      let html = ''; let offset = 0;
+      for (const match of value.matchAll(/\[\[([^\]]+?)\]\]/g)) {
+        html += escapeHtml(value.slice(offset, match.index));
+        const [page, alias] = match[1].split('|');
+        html += `<span class="backlink-mark">${escapeHtml((alias || page).trim())}</span>`;
+        offset = match.index + match[0].length;
+      }
+      return html + escapeHtml(value.slice(offset));
+    };
     const renderGroups = (items, limit = false) => {
       const groups = new Map();
       items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
@@ -1004,7 +1016,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const visible = limit ? ordered.slice(0, 5) : ordered;
       const rows = visible.map(([title, group]) => {
         const date = creationDate(group[0].page);
-        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${escapeHtml(item.content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220))}</button>`).join('')}</div>`;
+        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${referenceSnippet(item.content)}</button>`).join('')}</div>`;
       }).join('');
       return rows + (limit && ordered.length > 5 ? `<button class="references-more" type="button" data-show-all-references>Show all references · ${ordered.length}</button>` : '');
     };
@@ -1109,9 +1121,9 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function toggleGraphTask(block, focus = true) {
     const match = block.content.match(/^(TODO|DOING|DONE)(?:\s+|$)/);
-    const next = !match ? `TODO ${block.content}` : match[1] === 'TODO' ? block.content.replace(/^TODO/, 'DOING') : match[1] === 'DOING' ? block.content.replace(/^DOING/, 'DONE') : block.content.replace(/^DONE(?:\s+|$)/, '');
+    const next = !match ? `TODO ${block.content}` : match[1] === 'TODO' ? block.content.replace(/^TODO/, 'DOING') : match[1] === 'DOING' ? block.content.replace(/^DOING/, 'DONE') : block.content.replace(/^DONE/, 'TODO');
     block.content = next;
-    if (focus) graphMutationFocus(block, 0); else { graphChanged(); renderGraphPage(); }
+    if (focus) graphMutationFocus(block, block.content.length); else { graphChanged(); renderGraphPage(); }
   }
 
   function createNextGraphBlock(block, content = '') {
@@ -1151,6 +1163,10 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   let autocompleteItems = []; let autocompleteIndex = 0;
   const slashCommands = [
+    { title: '/todo', keywords: 'task to do', taskStatus: 'TODO' },
+    { title: '/doing', keywords: 'task in progress', taskStatus: 'DOING' },
+    { title: '/done', keywords: 'task completed', taskStatus: 'DONE' },
+    { title: '/scheduled', keywords: 'task schedule due date calendar', scheduled: true },
     { title: '/today', keywords: 'journal current date', days: 0 },
     { title: '/yesterday', keywords: 'journal previous date', days: -1 },
     { title: '/tomorrow', keywords: 'journal next date', days: 1 },
@@ -1176,8 +1192,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     const before = field.value.slice(0, field.selectionStart); const wikiMatch = before.match(/\[\[([^\]]*)$/);
     const blockMatch = before.match(/\(\(([^)]*)$/); const slashMatch = before.match(/\/([^/\n]*)$/);
     if (slashMatch) {
-      const query = slashMatch[1].trim().toLowerCase(); const typedCommand = `/${query}`;
-      autocompleteItems = slashCommands.filter(command => command.title.startsWith(typedCommand)).map(command => ({ ...command, slash: true }));
+      const rawQuery = slashMatch[1].trim(); const [name = '', ...remainder] = rawQuery.split(/\s+/); const typedCommand = `/${name.toLowerCase()}`;
+      autocompleteItems = slashCommands.filter(command => command.title.startsWith(typedCommand)).map(command => ({ ...command, slash: true, remainder: remainder.join(' ') }));
     } else if (wikiMatch && graphIndex) {
       const title = wikiMatch[1].trim(); const query = MarkdGraph.normalizePage(title);
       const pages = graphIndex.allPages();
@@ -1230,7 +1246,20 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     if (item.slash) {
       const start = before.lastIndexOf('/'); const end = field.selectionStart;
-      if (item.datePicker) {
+      if (item.taskStatus) {
+        const replacement = `${item.taskStatus}${item.remainder ? ` ${item.remainder}` : ' '}`;
+        field.setRangeText(replacement, start, end, 'end'); field.dispatchEvent(new InputEvent('input', { bubbles: true })); hideGraphAutocomplete(); field.focus();
+      } else if (item.scheduled) {
+        const anchor = graphAutocomplete.getBoundingClientRect(); hideGraphAutocomplete();
+        toggleJournalCalendar(date => {
+          const scheduled = `SCHEDULED: <${MarkdGraph.formatJournalDate(date, 'yyyy-MM-dd EEE')}>`;
+          let content = `${field.value.slice(0, start)}${field.value.slice(end)}`.trimEnd();
+          content = content.replace(/^\s*SCHEDULED:\s*<[^>]+>\s*$/m, '').trimEnd();
+          if (!/^(TODO|DOING|DONE)(?:\s+|$)/.test(content)) content = `TODO ${content.trimStart()}`;
+          content = `${content}${content ? '\n' : ''}${scheduled}`;
+          field.value = content; field.dispatchEvent(new InputEvent('input', { bubbles: true })); field.focus(); field.setSelectionRange(content.length, content.length);
+        }, anchor);
+      } else if (item.datePicker) {
         const anchor = graphAutocomplete.getBoundingClientRect(); hideGraphAutocomplete();
         toggleJournalCalendar(date => {
           const title = MarkdGraph.journalInfo(date, graphStore?.config).title; const reference = `[[${title}]]`;
