@@ -26,7 +26,7 @@
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
     vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
     graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
-    journalMode: false, journalLimit: 8
+    journalMode: false, journalLimit: 8, referencesExpanded: false
   };
   let journalDocuments = new Map();
   let graphHistory = [];
@@ -817,7 +817,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
     recordGraphHistory(page, options);
     state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
-    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 8 : state.journalLimit;
+    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 8 : state.journalLimit; state.referencesExpanded = false;
     if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
     activeSourceBlock = null; activeGraphBlock = null;
@@ -981,10 +981,32 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function renderReferences(includeUnlinked = false) {
     if (!state.graphMode || !graphIndex || !state.graphPage || (state.journalMode && !state.graphZoomId)) { references.innerHTML = ''; return; }
-    const renderGroups = items => {
+    const creationTimestamp = page => {
+      const value = MarkdGraph.propertiesFrom(page.content || '')['created-at'] || page.lastModified;
+      if (!value) return 0;
+      let date;
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+        const [year, month, day] = value.trim().split('-').map(Number); date = new Date(year, month - 1, day);
+      } else {
+        const numeric = Number(value); const timestamp = Number.isFinite(numeric) ? (numeric > 1e15 ? numeric / 1e6 : numeric) : value;
+        date = new Date(timestamp);
+      }
+      return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    };
+    const creationDate = page => {
+      const timestamp = creationTimestamp(page);
+      return timestamp ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(timestamp) : '';
+    };
+    const renderGroups = (items, limit = false) => {
       const groups = new Map();
       items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
-      return [...groups].map(([title, group]) => `<div class="reference-group"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${escapeHtml(item.content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220))}</button>`).join('')}</div>`).join('');
+      const ordered = [...groups].sort(([, a], [, b]) => creationTimestamp(b[0].page) - creationTimestamp(a[0].page));
+      const visible = limit ? ordered.slice(0, 5) : ordered;
+      const rows = visible.map(([title, group]) => {
+        const date = creationDate(group[0].page);
+        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${escapeHtml(item.content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220))}</button>`).join('')}</div>`;
+      }).join('');
+      return rows + (limit && ordered.length > 5 ? `<button class="references-more" type="button" data-show-all-references>Show all references · ${ordered.length}</button>` : '');
     };
     const aggregatePages = new Set(['home', 'journals', "today's journal", "today's journals", 'todays journal', 'todays journals', 'today journal']);
     const pageTitle = namespacePageTitle();
@@ -994,7 +1016,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const blockUuid = zoomedBlock && MarkdGraph.propertiesFrom(zoomedBlock.content).id;
     const blockLinked = blockUuid ? graphIndex.referencesToBlock(blockUuid) : [];
     const unlinked = includeUnlinked ? graphIndex.unlinkedReferences(pageTitle) : [];
-    references.innerHTML = `<details${linked.length ? ' open' : ''}><summary>Linked references · ${linked.length}</summary>${renderGroups(linked)}</details>${blockUuid ? `<details${blockLinked.length ? ' open' : ''}><summary>Block references · ${blockLinked.length}</summary>${renderGroups(blockLinked)}</details>` : ''}${includeUnlinked ? `<details${unlinked.length ? ' open' : ''}><summary>Unlinked references · ${unlinked.length}</summary>${renderGroups(unlinked)}</details>` : '<button class="unlinked-button" data-show-unlinked>Find unlinked references</button>'}`;
+    references.innerHTML = `<details${linked.length ? ' open' : ''}><summary>Linked references · ${linked.length}</summary>${renderGroups(linked, !state.referencesExpanded)}</details>${blockUuid ? `<details${blockLinked.length ? ' open' : ''}><summary>Block references · ${blockLinked.length}</summary>${renderGroups(blockLinked)}</details>` : ''}${includeUnlinked ? `<details${unlinked.length ? ' open' : ''}><summary>Unlinked references · ${unlinked.length}</summary>${renderGroups(unlinked)}</details>` : '<button class="unlinked-button" data-show-unlinked>Find unlinked references</button>'}`;
   }
 
   function graphMutationFocus(block, position = null) { graphChanged(); focusGraphBlock(block.id, position); }
@@ -2625,6 +2647,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     const reference = event.target.closest('[data-reference-page]');
     if (reference) { loadGraphPage(reference.dataset.referencePage, { blockId: reference.dataset.referenceBlock }); return; }
     if (event.target.closest('[data-show-unlinked]')) { renderReferences(true); return; }
+    if (event.target.closest('[data-show-all-references]')) {
+      state.referencesExpanded = true; renderReferences(!references.querySelector('[data-show-unlinked]')); return;
+    }
     if (event.target.closest('[data-clear-zoom]')) { state.graphZoomId = null; renderGraphPage(); return; }
     const toggle = event.target.closest('[data-block-toggle]');
     if (toggle) {
