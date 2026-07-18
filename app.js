@@ -26,7 +26,7 @@
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
     vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
     graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
-    journalMode: false, journalLimit: 8, referencesExpanded: false
+    journalMode: false, journalLimit: 1, referencesExpanded: false, taskView: null
   };
   let journalDocuments = new Map();
   let graphHistory = [];
@@ -541,6 +541,73 @@ Open, save, export, and reach recent documents or headings from the command pale
     return journalDocuments.get(page.path);
   }
 
+  function graphTasks() {
+    if (!graphIndex) return [];
+    const tasks = [];
+    for (const page of graphIndex.allPages()) {
+      const document = page.path === state.graphPage?.path ? state.graphDocument : graphIndex.documents.get(MarkdGraph.normalizePage(page.title));
+      for (const { block } of MarkdGraph.flattenBlocks(document?.blocks)) {
+        const marker = block.content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/)?.[1];
+        if (!marker) continue;
+        const scheduled = block.content.match(/^\s*(?:SCHEDULED|DEADLINE):\s*<(\d{4}-\d{2}-\d{2})\b[^>]*>/m)?.[1] || '';
+        const text = block.content.replace(/^[A-Z]+(?:\s+|$)/, '').replace(/^\s*(?:SCHEDULED|DEADLINE):.*$/gm, '').trim();
+        tasks.push({ page, block, marker, scheduled, text, done: /^(DONE|CANCELED|CANCELLED)$/.test(marker), progress: /^(DOING|NOW)$/.test(marker), later: /^(LATER|WAITING)$/.test(marker) });
+      }
+    }
+    return tasks;
+  }
+
+  function taskDate(days = 0) {
+    const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + days);
+    return MarkdGraph.formatJournalDate(date, 'yyyy-MM-dd');
+  }
+
+  function taskGroups(tasks = graphTasks()) {
+    const today = taskDate(); const week = taskDate(7); const now = new Date(); const endOfWeek = taskDate((7 - now.getDay()) % 7);
+    return {
+      overdue: tasks.filter(task => !task.done && task.scheduled && task.scheduled < today),
+      today: tasks.filter(task => !task.done && (task.scheduled === today || (!task.scheduled && task.page.journalDate === today))),
+      progress: tasks.filter(task => !task.done && task.progress),
+      next: tasks.filter(task => !task.done && task.scheduled > today),
+      thisWeek: tasks.filter(task => !task.done && task.scheduled >= today && task.scheduled <= endOfWeek),
+      nextWeek: tasks.filter(task => !task.done && task.scheduled > today && task.scheduled <= week),
+      unscheduled: tasks.filter(task => !task.done && !task.scheduled && !task.later),
+      later: tasks.filter(task => !task.done && task.later),
+      done: tasks.filter(task => task.done)
+    };
+  }
+
+  function taskSummary() {
+    const groups = taskGroups();
+    return { today: groups.today.length, week: new Set([...groups.today, ...groups.thisWeek]).size };
+  }
+
+  function dayGreeting() {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    if (hour < 22) return 'Good evening';
+    return 'Good night';
+  }
+
+  function taskRowsHtml(items) {
+    return items.length ? items.map(task => `<button type="button" class="task-dashboard-item" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span class="task-dashboard-state task-dashboard-state-${task.done ? 'done' : task.progress ? 'doing' : 'todo'}" aria-hidden="true"></span><span>${escapeHtml(task.text || 'Untitled task')}</span>${task.scheduled ? `<time>${escapeHtml(task.scheduled)}</time>` : ''}<small>${escapeHtml(task.page.title)}</small></button>`).join('') : '<p class="task-dashboard-empty">No tasks</p>';
+  }
+
+  function journalTaskPanelElement() {
+    const groups = taskGroups(); const panel = document.createElement('section'); panel.className = 'journal-task-panel';
+    const thisWeek = groups.thisWeek.filter(task => !groups.today.includes(task));
+    panel.innerHTML = `<section class="task-dashboard-group"><h2>Today<span>${groups.today.length}</span></h2>${taskRowsHtml(groups.today)}</section><section class="task-dashboard-group"><h2>This week<span>${thisWeek.length}</span></h2>${taskRowsHtml(thisWeek)}</section><button type="button" class="journal-all-tasks" data-task-filter="all">All tasks</button>`;
+    return panel;
+  }
+
+  function taskDashboardElement() {
+    const groups = taskGroups(); const dashboard = document.createElement('section'); dashboard.className = 'task-dashboard';
+    const sections = [['overdue', 'Overdue'], ['today', 'Today'], ['nextWeek', 'Next 7 days'], ['unscheduled', 'Unscheduled'], ['later', 'Later'], ['done', 'Done']];
+    dashboard.innerHTML = `<header><button type="button" data-close-task-view aria-label="Back">‹</button><h1>Tasks</h1></header>${sections.map(([key, label]) => `<section class="task-dashboard-group"><h2>${label}<span>${groups[key].length}</span></h2>${taskRowsHtml(groups[key])}</section>`).join('')}`;
+    return dashboard;
+  }
+
   function renderGraphPage() {
     if (!state.graphMode || !state.graphDocument) return;
     activeGraphBlock = null; mobileBlockToolbar.hidden = true;
@@ -574,6 +641,12 @@ Open, save, export, and reach recent documents or headings from the command pale
       return fragment;
     };
 
+    if (state.taskView === 'all') {
+      blockTree.replaceChildren(taskDashboardElement());
+      $('#pagePreamble').hidden = true; $('#zoomBreadcrumb').hidden = true; pageHierarchy.hidden = true; references.innerHTML = '';
+      app.classList.add('task-view'); return;
+    }
+    app.classList.remove('task-view');
     const fragment = document.createDocumentFragment();
     if (state.journalMode && !state.graphZoomId) {
       const pages = orderedJournalPages().slice(0, state.journalLimit);
@@ -581,8 +654,16 @@ Open, save, export, and reach recent documents or headings from the command pale
       for (const page of pages) {
         const journalDocument = cachedJournalDocument(page); const section = document.createElement('section');
         section.className = `journal-entry${page.path === state.graphPage.path ? ' active' : ''}${page.journalDate === today ? ' today' : ''}`; section.dataset.journalPath = page.path;
+        if (page.journalDate === today) {
+          const intro = document.createElement('p'); intro.className = 'journal-today-intro'; intro.textContent = `${dayGreeting()} Giovanni, what are we doing today?`; section.append(intro);
+        }
         const heading = document.createElement('button'); heading.type = 'button'; heading.className = 'journal-heading';
         heading.dataset.journalPage = page.path; heading.textContent = page.title; section.append(heading);
+        if (page.journalDate === today) {
+          const summary = taskSummary(); const button = document.createElement('button'); button.type = 'button'; button.className = 'journal-task-summary'; button.dataset.openTaskView = '';
+          button.textContent = `${summary.today} ${summary.today === 1 ? 'task' : 'tasks'} today, ${summary.week} in this week`; section.append(button);
+          if (state.taskView === 'summary') section.append(journalTaskPanelElement());
+        }
         const preamble = visibleGraphPreamble(journalDocument.preamble);
         if (preamble) { const properties = document.createElement('div'); properties.className = 'journal-preamble'; properties.textContent = preamble; section.append(properties); }
         const tree = document.createElement('div'); tree.className = 'journal-blocks'; tree.append(renderBlocks(journalDocument.blocks, page)); section.append(tree); fragment.append(section);
@@ -603,9 +684,6 @@ Open, save, export, and reach recent documents or headings from the command pale
     breadcrumb.hidden = !state.graphZoomId;
     breadcrumb.innerHTML = state.graphZoomId ? `<button type="button" data-clear-zoom>${escapeHtml(state.graphPage?.title || 'Page')}</button> / Block` : '';
     renderPageHierarchy(); renderReferences();
-    if (state.journalMode && !state.graphZoomId && state.journalLimit < orderedJournalPages().length) requestAnimationFrame(() => {
-      if (state.journalMode && markdWrap.scrollHeight <= markdWrap.clientHeight + 80) { state.journalLimit += 8; renderGraphPage(); }
-    });
   }
 
   function resizeGraphEditor(field) {
@@ -821,7 +899,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
     recordGraphHistory(page, options);
     state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
-    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 8 : state.journalLimit; state.referencesExpanded = false;
+    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false; state.taskView = null;
     if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
     activeSourceBlock = null; activeGraphBlock = null;
@@ -944,8 +1022,8 @@ Open, save, export, and reach recent documents or headings from the command pale
   async function closeGraph() {
     if (state.dirty && !(await flushGraphSave(true))) return;
     closeRemoteEvents?.(); closeRemoteEvents = null; graphStore?.disposeAssets();
-    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1;
-    outliner.hidden = true; app.classList.remove('graph-mode', 'journal-mode');
+    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; state.taskView = null; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1;
+    outliner.hidden = true; app.classList.remove('graph-mode', 'journal-mode', 'task-view');
     const docs = getStoredDocs();
     if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
     else loadMarkdown('', 'Untitled');
@@ -2658,6 +2736,15 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
   });
   outliner.addEventListener('click', event => {
+    if (event.target.closest('[data-open-task-view]')) { state.taskView = state.taskView === 'summary' ? null : 'summary'; renderGraphPage(); return; }
+    if (event.target.closest('[data-close-task-view]')) { state.taskView = null; renderGraphPage(); return; }
+    const taskFilter = event.target.closest('[data-task-filter]');
+    if (taskFilter) { state.taskView = taskFilter.dataset.taskFilter; renderGraphPage(); return; }
+    const taskSource = event.target.closest('[data-task-page]');
+    if (taskSource) {
+      const page = graphStore?.pages.find(item => item.path === taskSource.dataset.taskPage);
+      if (page) loadGraphPage(page, { blockId: taskSource.dataset.taskBlockId }); return;
+    }
     const journalHeading = event.target.closest('[data-journal-page]');
     if (journalHeading) { openSingleJournalPage(journalHeading.dataset.journalPage); return; }
     if (event.target.closest('[data-journal-more]')) { state.journalLimit += 8; renderGraphPage(); return; }
