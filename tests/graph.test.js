@@ -21,6 +21,16 @@ test('parses and serializes nested Logseq blocks', () => {
   assert.equal(Graph.serializeDocument(document), markdown);
 });
 
+test('preserves Logseq task markers and scheduling metadata', () => {
+  const markdown = '- TODO Prepare release\n  SCHEDULED: <2026-07-18 Sat>\n- NOW Review changes\n  DEADLINE: <2026-07-20 Mon>\n- DONE Publish\n';
+  const document = Graph.parseDocument(markdown);
+
+  assert.equal(document.blocks[0].content, 'TODO Prepare release\nSCHEDULED: <2026-07-18 Sat>');
+  assert.equal(document.blocks[1].content, 'NOW Review changes\nDEADLINE: <2026-07-20 Mon>');
+  assert.equal(document.blocks[2].content, 'DONE Publish');
+  assert.equal(Graph.serializeDocument(document), markdown);
+});
+
 test('keeps fenced code inside a single graph block', () => {
   const markdown = '- ```bash\n  echo "hello"\n  - this is code, not a child block\n  ```\n- next block\n';
   const document = Graph.parseDocument(markdown);

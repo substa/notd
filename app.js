@@ -425,8 +425,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     let html = quote
       ? `<blockquote>${inlineMarkdown(value.split('\n').map(line => line.replace(/^\s*>\s?/, '')).join('\n')).replace(/\n/g, '<br>')}</blockquote>`
       : inlineMarkdown(value).replace(/\n/g, '<br>');
-    html = html.replace(/^(TODO|DOING|DONE)\b/, status => `<button class="graph-task graph-task-${status.toLowerCase()}" data-task-block="${escapeHtml(block.id)}">${status}</button>`);
-    html = html.replace(/SCHEDULED:\s*&lt;([^&]+)&gt;/g, '<span class="graph-scheduled">Scheduled · $1</span>');
+    html = html.replace(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)\b/, status => {
+      const state = /^(DONE|CANCELED|CANCELLED)$/.test(status) ? 'done' : /^(DOING|NOW)$/.test(status) ? 'doing' : 'todo';
+      return `<button class="graph-task graph-task-${state}" data-task-block="${escapeHtml(block.id)}" aria-label="Task status: ${status}" title="${status}"><span aria-hidden="true"></span></button>`;
+    });
+    html = html.replace(/(?:<br>)?(SCHEDULED|DEADLINE):\s*&lt;([^&]+)&gt;/g, (_, type, date) => `<span class="graph-scheduled" title="${type === 'DEADLINE' ? 'Deadline' : 'Scheduled'}"><span class="graph-scheduled-icon" aria-hidden="true"></span>${date}</span>`);
     html = html.replace(/\[\[([^\]]+?)\]\]/g, (_, target) => {
       const [page, alias] = target.split('|');
       return `<button class="graph-page-ref" data-page="${escapeHtml(page.trim())}">${alias ? escapeHtml(alias.trim()) : escapeHtml(page.trim())}</button>`;
@@ -1120,8 +1123,8 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function toggleGraphTask(block, focus = true) {
-    const match = block.content.match(/^(TODO|DOING|DONE)(?:\s+|$)/);
-    const next = !match ? `TODO ${block.content}` : match[1] === 'TODO' ? block.content.replace(/^TODO/, 'DOING') : match[1] === 'DOING' ? block.content.replace(/^DOING/, 'DONE') : block.content.replace(/^DONE/, 'TODO');
+    const match = block.content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/);
+    const next = !match ? `TODO ${block.content}` : /^(TODO|LATER|WAITING)$/.test(match[1]) ? block.content.replace(/^[A-Z]+/, 'DOING') : /^(DOING|NOW)$/.test(match[1]) ? block.content.replace(/^[A-Z]+/, 'DONE') : block.content.replace(/^[A-Z]+/, 'TODO');
     block.content = next;
     if (focus) graphMutationFocus(block, block.content.length); else { graphChanged(); renderGraphPage(); }
   }
@@ -1255,7 +1258,7 @@ Open, save, export, and reach recent documents or headings from the command pale
           const scheduled = `SCHEDULED: <${MarkdGraph.formatJournalDate(date, 'yyyy-MM-dd EEE')}>`;
           let content = `${field.value.slice(0, start)}${field.value.slice(end)}`.trimEnd();
           content = content.replace(/^\s*SCHEDULED:\s*<[^>]+>\s*$/m, '').trimEnd();
-          if (!/^(TODO|DOING|DONE)(?:\s+|$)/.test(content)) content = `TODO ${content.trimStart()}`;
+          if (!/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/.test(content)) content = `TODO ${content.trimStart()}`;
           content = `${content}${content ? '\n' : ''}${scheduled}`;
           field.value = content; field.dispatchEvent(new InputEvent('input', { bubbles: true })); field.focus(); field.setSelectionRange(content.length, content.length);
         }, anchor);
