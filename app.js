@@ -26,7 +26,7 @@
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
     vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
     graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
-    journalMode: false, journalLimit: 1, referencesExpanded: false, taskView: null
+    journalMode: false, journalLimit: 1, referencesExpanded: false, taskView: null, taskLimits: {}, taskExpanded: {}
   };
   let journalDocuments = new Map();
   let graphHistory = [];
@@ -419,7 +419,8 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function graphTextHtml(text, block) {
-    const value = text.replace(/^\n+|\n+$/g, '');
+    // Logseq may leave indented blank lines before task scheduling metadata.
+    const value = text.replace(/^\n+|\n+$/g, '').replace(/\n(?:[ \t]*\n)+(?=[ \t]*(?:SCHEDULED|DEADLINE):)/g, '\n');
     if (!value) return '';
     const quote = value.split('\n').every(line => /^\s*>/.test(line));
     let html = quote
@@ -429,7 +430,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const state = /^(DONE|CANCELED|CANCELLED)$/.test(status) ? 'done' : /^(DOING|NOW)$/.test(status) ? 'doing' : 'todo';
       return `<button class="graph-task graph-task-${state}" data-task-block="${escapeHtml(block.id)}" aria-label="Task status: ${status}" title="${status}"><span aria-hidden="true"></span></button>`;
     });
-    html = html.replace(/(?:<br>)?(SCHEDULED|DEADLINE):\s*&lt;([^&]+)&gt;/g, (_, type, date) => `<span class="graph-scheduled" title="${type === 'DEADLINE' ? 'Deadline' : 'Scheduled'}"><span class="graph-scheduled-icon" aria-hidden="true"></span>${date}</span>`);
+    html = html.replace(/(?:<br>\s*)*\s*(SCHEDULED|DEADLINE):\s*&lt;([^&]+)&gt;/g, (_, type, date) => `<button type="button" class="graph-scheduled" data-scheduled-block="${escapeHtml(block.id)}" data-scheduled-date="${escapeHtml(date.slice(0, 10))}" title="Edit ${type === 'DEADLINE' ? 'deadline' : 'scheduled date'}"><span class="graph-scheduled-icon" aria-hidden="true"></span>${date}</button>`);
     html = html.replace(/\[\[([^\]]+?)\]\]/g, (_, target) => {
       const [page, alias] = target.split('|');
       return `<button class="graph-page-ref" data-page="${escapeHtml(page.trim())}">${alias ? escapeHtml(alias.trim()) : escapeHtml(page.trim())}</button>`;
@@ -579,32 +580,56 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function taskSummary() {
     const groups = taskGroups();
-    return { today: groups.today.length, week: new Set([...groups.today, ...groups.thisWeek]).size };
-  }
-
-  function dayGreeting() {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    if (hour < 22) return 'Good evening';
-    return 'Good night';
+    return { today: groups.overdue.length + groups.today.length, week: new Set([...groups.today, ...groups.thisWeek]).size };
   }
 
   function taskRowsHtml(items) {
-    return items.length ? items.map(task => `<button type="button" class="task-dashboard-item" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span class="task-dashboard-state task-dashboard-state-${task.done ? 'done' : task.progress ? 'doing' : 'todo'}" aria-hidden="true"></span><span>${escapeHtml(task.text || 'Untitled task')}</span>${task.scheduled ? `<time>${escapeHtml(task.scheduled)}</time>` : ''}<small>${escapeHtml(task.page.title)}</small></button>`).join('') : '<p class="task-dashboard-empty">No tasks</p>';
+    const today = taskDate();
+    return items.length ? items.map(task => {
+      const overdue = !task.done && task.scheduled && task.scheduled < today;
+      return `<button type="button" class="task-dashboard-item" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span class="task-dashboard-state task-dashboard-state-${task.done ? 'done' : task.progress ? 'doing' : 'todo'}" aria-hidden="true"></span><span>${overdue ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ''}${escapeHtml(task.text || 'Untitled task')}</span>${task.scheduled ? `<time class="graph-scheduled" data-scheduled-page="${escapeHtml(task.page.path)}" data-scheduled-block="${escapeHtml(task.block.id)}" data-scheduled-date="${escapeHtml(task.scheduled)}" title="Edit scheduled date"><span class="graph-scheduled-icon" aria-hidden="true"></span>${escapeHtml(task.scheduled)}</time>` : ''}</button>`;
+    }).join('') : '<p class="task-dashboard-empty">No tasks</p>';
   }
 
   function journalTaskPanelElement() {
     const groups = taskGroups(); const panel = document.createElement('section'); panel.className = 'journal-task-panel';
-    const thisWeek = groups.thisWeek.filter(task => !groups.today.includes(task));
-    panel.innerHTML = `<section class="task-dashboard-group"><h2>Today<span>${groups.today.length}</span></h2>${taskRowsHtml(groups.today)}</section><section class="task-dashboard-group"><h2>This week<span>${thisWeek.length}</span></h2>${taskRowsHtml(thisWeek)}</section><button type="button" class="journal-all-tasks" data-task-filter="all">All tasks</button>`;
+    const tomorrowDate = taskDate(1);
+    const sections = [
+      ['Today', [...groups.overdue, ...groups.today]],
+      ['Tomorrow', groups.next.filter(task => task.scheduled === tomorrowDate)],
+      ['Next days', groups.next.filter(task => task.scheduled > tomorrowDate)]
+    ];
+    panel.innerHTML = `${sections.map(([label, tasks]) => `<details class="task-dashboard-group" open><summary><span>${label}</span><span class="task-section-count">${tasks.length}</span></summary>${taskRowsHtml(tasks)}</details>`).join('')}<button type="button" class="journal-all-tasks" data-task-filter="all">All tasks</button>`;
     return panel;
+  }
+
+  async function openTasksPage() {
+    if (!graphStore) await openGraph();
+    if (!graphStore) return;
+    let page = graphStore.pages.find(item => item.name.toLowerCase() === 'tasks.md');
+    if (!page) {
+      page = await graphStore.createPage('Task dashboard', {
+        filename: 'tasks',
+        content: 'title:: Tasks\n\n<!-- This file is rendered as the markd task dashboard. -->\n'
+      });
+      page.title = 'Tasks';
+      graphIndex.rebuild(graphStore.pages);
+    }
+    state.taskLimits = {};
+    state.taskExpanded = {};
+    await loadGraphPage(page);
   }
 
   function taskDashboardElement() {
     const groups = taskGroups(); const dashboard = document.createElement('section'); dashboard.className = 'task-dashboard';
-    const sections = [['overdue', 'Overdue'], ['today', 'Today'], ['nextWeek', 'Next 7 days'], ['unscheduled', 'Unscheduled'], ['later', 'Later'], ['done', 'Done']];
-    dashboard.innerHTML = `<header><button type="button" data-close-task-view aria-label="Back">‹</button><h1>Tasks</h1></header>${sections.map(([key, label]) => `<section class="task-dashboard-group"><h2>${label}<span>${groups[key].length}</span></h2>${taskRowsHtml(groups[key])}</section>`).join('')}`;
+    const sections = [['today', 'Today'], ['nextWeek', 'Next 7 days'], ['later', 'Later'], ['unscheduled', 'Unscheduled'], ['done', 'Done']];
+    const collapsed = new Set(['later', 'unscheduled', 'done']);
+    const sectionHtml = ([key, label]) => {
+      const tasks = key === 'today' ? [...groups.overdue, ...groups.today] : groups[key]; const limit = state.taskLimits[key] || 10; const remaining = tasks.length - limit;
+      const more = remaining > 0 ? `<button type="button" class="task-dashboard-more" data-task-more="${key}">Show next ${Math.min(10, remaining)}</button>` : '';
+      return `<details class="task-dashboard-group"${collapsed.has(key) && !state.taskExpanded[key] ? '' : ' open'}><summary><span>${label}</span><span class="task-section-count">${tasks.length}</span></summary>${taskRowsHtml(tasks.slice(0, limit))}${more}</details>`;
+    };
+    dashboard.innerHTML = `<header><button type="button" data-close-task-view aria-label="Back">‹</button><h1>Tasks</h1></header>${sections.map(sectionHtml).join('')}`;
     return dashboard;
   }
 
@@ -654,9 +679,6 @@ Open, save, export, and reach recent documents or headings from the command pale
       for (const page of pages) {
         const journalDocument = cachedJournalDocument(page); const section = document.createElement('section');
         section.className = `journal-entry${page.path === state.graphPage.path ? ' active' : ''}${page.journalDate === today ? ' today' : ''}`; section.dataset.journalPath = page.path;
-        if (page.journalDate === today) {
-          const intro = document.createElement('p'); intro.className = 'journal-today-intro'; intro.textContent = `${dayGreeting()} Giovanni, what are we doing today?`; section.append(intro);
-        }
         const heading = document.createElement('button'); heading.type = 'button'; heading.className = 'journal-heading';
         heading.dataset.journalPage = page.path; heading.textContent = page.title; section.append(heading);
         if (page.journalDate === today) {
@@ -712,7 +734,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     else if (field.value && (field.value.split('\n').every(line => /^\s*>/.test(line)) || field.value.split('\n').some(orgQuoteOpening))) field.classList.add('graph-quote-editor');
     field.dataset.blockId = block.id;
     field.addEventListener('beforeinput', event => {
-      if (matchMedia('(max-width:720px)').matches && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
+      if (!state.vimEnabled && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
+      else if (matchMedia('(max-width:720px)').matches && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
     });
     field.addEventListener('input', handleGraphBlockInput);
     field.addEventListener('keydown', handleGraphBlockKeydown);
@@ -899,7 +922,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
     recordGraphHistory(page, options);
     state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
-    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false; state.taskView = null;
+    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false;
+    state.taskView = page.name.toLowerCase() === 'tasks.md' ? 'all' : null;
     if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
     activeSourceBlock = null; activeGraphBlock = null;
@@ -966,6 +990,12 @@ Open, save, export, and reach recent documents or headings from the command pale
     markdWrap.scrollTop = 0;
   }
 
+  function calendarTaskRowsHtml(tasks) {
+    if (!tasks.length) return '<p>No tasks</p>';
+    const today = taskDate();
+    return tasks.map(task => `<button type="button" class="calendar-task" data-calendar-task-page="${escapeHtml(task.page.path)}" data-calendar-task-block="${escapeHtml(task.block.id)}"><span aria-hidden="true"></span><b>${task.scheduled && task.scheduled < today ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ''}${escapeHtml(task.text || 'Untitled task')}</b></button>`).join('');
+  }
+
   function renderJournalCalendar() {
     const year = calendarViewDate.getFullYear(); const month = calendarViewDate.getMonth();
     $('#calendarMonth').textContent = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(calendarViewDate);
@@ -980,6 +1010,12 @@ Open, save, export, and reach recent documents or headings from the command pale
       const classes = [date.getMonth() !== month ? 'outside' : '', value === today ? 'today' : '', value === current ? 'current' : ''].filter(Boolean).join(' ');
       return `<button type="button" class="${classes}" data-calendar-date="${value}" tabindex="${value === focused ? '0' : '-1'}" aria-label="${escapeHtml(date.toLocaleDateString(undefined, { dateStyle: 'full' }))}">${date.getDate()}</button>`;
     }).join('');
+    const calendarTasks = $('#calendarTasks'); calendarTasks.hidden = Boolean(calendarSelectAction);
+    if (calendarSelectAction) { calendarTasks.innerHTML = ''; return; }
+    const groups = taskGroups(); const tomorrowDate = taskDate(1);
+    const tomorrow = groups.next.filter(task => task.scheduled === tomorrowDate);
+    const todayTasks = [...groups.overdue, ...groups.today];
+    calendarTasks.innerHTML = `<section><h3>Today <span>${todayTasks.length}</span></h3>${calendarTaskRowsHtml(todayTasks)}</section><section><h3>Tomorrow <span>${tomorrow.length}</span></h3>${calendarTaskRowsHtml(tomorrow)}</section><button type="button" class="calendar-all-tasks" data-calendar-all-tasks>All tasks <span aria-hidden="true">→</span></button>`;
   }
 
   function focusCalendarDate(date) {
@@ -996,11 +1032,28 @@ Open, save, export, and reach recent documents or headings from the command pale
     target.setDate(Math.min(day, lastDay)); focusCalendarDate(target);
   }
 
-  function toggleJournalCalendar(selectAction = null, anchor = null) {
+  async function updateScheduledDate(pagePath, blockId, date) {
+    const page = graphStore?.pages.find(item => item.path === pagePath); if (!page) return;
+    const current = page.path === state.graphPage?.path;
+    const document = current ? state.graphDocument : (journalDocuments.get(page.path) || MarkdGraph.parseDocument(page.content));
+    const block = graphBlockLocation(blockId, document?.blocks)?.block; if (!block) return;
+    const value = MarkdGraph.formatJournalDate(date, 'yyyy-MM-dd EEE');
+    block.content = block.content.replace(/^(\s*)(SCHEDULED|DEADLINE):\s*<[^>]+>\s*$/m, (_, space, type) => `${space}${type}: <${value}>`);
+    if (current) graphChanged();
+    else {
+      const content = MarkdGraph.serializeDocument(document);
+      await graphStore.writePage(page, content);
+      graphIndex.updatePage(page, content);
+      if (page.journal || journalDocuments.has(page.path)) journalDocuments.set(page.path, document);
+    }
+    renderGraphPage();
+  }
+
+  function toggleJournalCalendar(selectAction = null, anchor = null, initialDate = null) {
     const opening = journalCalendar.hidden || selectAction;
     journalCalendar.hidden = !opening; $('#journalCalendarButton').setAttribute('aria-expanded', String(opening));
     if (opening) {
-      calendarSelectAction = selectAction; calendarFocusDate = new Date(); calendarFocusDate.setHours(12, 0, 0, 0);
+      calendarSelectAction = selectAction; calendarFocusDate = initialDate ? new Date(initialDate) : new Date(); calendarFocusDate.setHours(12, 0, 0, 0);
       calendarViewDate = new Date(calendarFocusDate); calendarViewDate.setDate(1);
       journalCalendar.classList.toggle('inline', Boolean(anchor));
       journalCalendar.style.left = anchor ? `${Math.min(innerWidth - 250, Math.max(8, anchor.left))}px` : '';
@@ -1215,6 +1268,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     graphMutationFocus(next, 0); return next;
   }
 
+  function createPreviousGraphBlock(block) {
+    const location = graphBlockLocation(block.id); if (!location) return null;
+    const previous = { id: MarkdGraph.newId(), uuid: null, content: '', marker: block.marker || '-', children: [], collapsed: false };
+    location.blocks.splice(location.index, 0, previous);
+    graphMutationFocus(previous, 0); return previous;
+  }
+
   function handleGraphBlockKeydown(event) {
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
     const block = location.block;
@@ -1228,6 +1288,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       const start = field.selectionStart, end = field.selectionEnd;
+      if (start === 0 && end === 0 && block.children.length) { createPreviousGraphBlock(block); return; }
       block.content = field.value.slice(0, start);
       createNextGraphBlock(block, field.value.slice(end)); return;
     }
@@ -1895,6 +1956,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     source.dataset.block = block.tagName.toLowerCase();
     source.value = markdownForBlock(block);
     source.addEventListener('keydown', handleSourceBlockKeydown);
+    source.addEventListener('beforeinput', event => {
+      if (!state.vimEnabled && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(source);
+    });
     source.addEventListener('input', () => resizeSourceBlock(source));
     block.replaceWith(source);
     activeSourceBlock = source;
@@ -2625,9 +2689,15 @@ Open, save, export, and reach recent documents or headings from the command pale
   }));
   $('#todayJournalButton').addEventListener('click', () => { closeJournalCalendar(); requestAction(() => openToday(true)); });
   $('#journalCalendarButton').addEventListener('click', event => { event.stopPropagation(); toggleJournalCalendar(); });
-  journalCalendar.addEventListener('click', event => {
+  journalCalendar.addEventListener('click', async event => {
     const move = event.target.closest('[data-calendar-move]');
     if (move) { moveCalendarMonth(Number(move.dataset.calendarMove)); return; }
+    if (event.target.closest('[data-calendar-all-tasks]')) { closeJournalCalendar(); await openTasksPage(); return; }
+    const task = event.target.closest('[data-calendar-task-page]');
+    if (task) {
+      const page = graphStore?.pages.find(item => item.path === task.dataset.calendarTaskPage);
+      closeJournalCalendar(); if (page) await loadGraphPage(page, { blockId: task.dataset.calendarTaskBlock }); return;
+    }
     const day = event.target.closest('[data-calendar-date]'); if (!day) return;
     const [year, month, date] = day.dataset.calendarDate.split('-').map(Number); const selectedDate = new Date(year, month - 1, date, 12);
     const action = calendarSelectAction; closeJournalCalendar();
@@ -2650,6 +2720,13 @@ Open, save, export, and reach recent documents or headings from the command pale
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !journalCalendar.hidden) closeJournalCalendar(); });
   $('#commandButton').addEventListener('click', () => showCommandPalette());
   $('#documentationClose').addEventListener('click', closeDocumentation);
+  document.addEventListener('keydown', event => {
+    const key = event.key.toLowerCase();
+    const redo = key === 'y' || (key === 'z' && event.shiftKey);
+    if (state.vimEnabled || !(event.metaKey || event.ctrlKey) || (key !== 'z' && key !== 'y')) return;
+    event.preventDefault();
+    applyVimHistory(redo);
+  }, true);
   document.addEventListener('keydown', handleVimKeydown, true);
   document.addEventListener('pointerup', event => {
     if (!state.vimEnabled || state.vimMode !== 'normal') return;
@@ -2713,6 +2790,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!event.target.matches?.('.md-source-block') && event.inputType?.startsWith('insert')) transformInlineMarkdown();
     changed();
   });
+  sourceEditor.addEventListener('beforeinput', event => {
+    if (!state.vimEnabled && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(sourceEditor);
+  });
   sourceEditor.addEventListener('input', changed);
   sourceEditor.addEventListener('keydown', event => {
     if (handleSelectionDelimiter(event)) return;
@@ -2735,11 +2815,31 @@ Open, save, export, and reach recent documents or headings from the command pale
   editor.addEventListener('click', event => {
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
   });
-  outliner.addEventListener('click', event => {
+  outliner.addEventListener('click', async event => {
+    const scheduledDate = event.target.closest('[data-scheduled-block]');
+    if (scheduledDate) {
+      event.preventDefault(); event.stopPropagation();
+      const pagePath = scheduledDate.dataset.scheduledPage || scheduledDate.closest('.block-node')?.dataset.pagePath;
+      const blockId = scheduledDate.dataset.scheduledBlock; const initialDate = `${scheduledDate.dataset.scheduledDate}T12:00:00`;
+      toggleJournalCalendar(date => updateScheduledDate(pagePath, blockId, date).catch(error => toast(error.message || 'Could not update the scheduled date')), scheduledDate.getBoundingClientRect(), initialDate);
+      return;
+    }
     if (event.target.closest('[data-open-task-view]')) { state.taskView = state.taskView === 'summary' ? null : 'summary'; renderGraphPage(); return; }
-    if (event.target.closest('[data-close-task-view]')) { state.taskView = null; renderGraphPage(); return; }
+    if (event.target.closest('[data-close-task-view]')) {
+      if (state.graphPage?.name.toLowerCase() === 'tasks.md') {
+        if (graphHistoryIndex > 0) await navigateGraphHistory(-1);
+        else await openToday();
+      } else { state.taskView = null; renderGraphPage(); }
+      return;
+    }
+    const taskMore = event.target.closest('[data-task-more]');
+    if (taskMore) { const key = taskMore.dataset.taskMore; state.taskLimits[key] = (state.taskLimits[key] || 10) + 10; state.taskExpanded[key] = true; renderGraphPage(); return; }
     const taskFilter = event.target.closest('[data-task-filter]');
-    if (taskFilter) { state.taskView = taskFilter.dataset.taskFilter; renderGraphPage(); return; }
+    if (taskFilter) {
+      if (taskFilter.dataset.taskFilter === 'all') await openTasksPage();
+      else { state.taskView = taskFilter.dataset.taskFilter; renderGraphPage(); }
+      return;
+    }
     const taskSource = event.target.closest('[data-task-page]');
     if (taskSource) {
       const page = graphStore?.pages.find(item => item.path === taskSource.dataset.taskPage);
