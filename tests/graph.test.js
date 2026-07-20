@@ -61,6 +61,15 @@ test('keeps Org quote contents inside a single graph block', () => {
   assert.equal(Graph.serializeDocument(document), markdown);
 });
 
+test('does not index shell conditionals in fenced code as page references', () => {
+  const index = new Graph.GraphIndex([
+    { title: 'Script', path: 'pages/script.md', content: '- ```bash\n  [[ -z "${VALUE}" ]] && echo empty\n  ```\n- [[Real page]]\n' }
+  ]);
+
+  assert.equal(index.pageSuggestions().some(page => page.title.includes('${VALUE}')), false);
+  assert.equal(index.referencesToPage('Real page').length, 1);
+});
+
 test('indexes page and block references', () => {
   const pages = [
     { title: 'Source', path: 'pages/source.md', content: '- See [[Alias]] and ((12345678-abcd))\n' },
@@ -71,6 +80,26 @@ test('indexes page and block references', () => {
   assert.equal(index.referencesToPage('target').length, 1);
   assert.equal(index.resolveBlock('12345678-abcd').page.title, 'Target');
   assert.equal(index.search('referenced').length, 1);
+});
+
+test('finds references to pages that have no Markdown file yet', () => {
+  const index = new Graph.GraphIndex([
+    { title: 'Meeting', path: 'pages/meeting.md', content: '- Meeting with [[Nome Cognome]]\n' }
+  ]);
+
+  assert.equal(index.resolvePage('Nome Cognome'), undefined);
+  assert.equal(index.referencesToPage('Nome Cognome').length, 1);
+  assert.deepEqual(index.pageSuggestions().find(page => page.title === 'Nome Cognome')?.virtual, true);
+});
+
+test('keeps every scanned page in the index when titles or aliases overlap', () => {
+  const index = new Graph.GraphIndex([
+    { title: 'Duplicate', path: 'pages/first.md', content: '- First unique block\n' },
+    { title: 'Duplicate', path: 'pages/second.md', content: '- Second unique block\n' }
+  ]);
+
+  assert.equal(index.allPages().length, 2);
+  assert.equal(index.search('second unique').length, 1);
 });
 
 test('indexes namespaced page links and tags', () => {

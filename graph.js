@@ -153,7 +153,9 @@
   }
 
   function pageReferences(text) {
-    return [...text.matchAll(/\[\[([^\]]+?)\]\]/g)].map(match => match[1].split('|')[0].trim());
+    // Shell conditionals and other fenced code can contain `[[ … ]]`; they are not wiki links.
+    const prose = String(text || '').replace(/(^|\n)\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, '$1');
+    return [...prose.matchAll(/\[\[([^\]]+?)\]\]/g)].map(match => match[1].split('|')[0].trim());
   }
 
   function blockReferences(text) {
@@ -368,6 +370,44 @@
       return { content: await file.text(), lastModified: file.lastModified };
     }
 
+    async writeAsset(file, preferredName = safeFilename(file.name)) {
+      if (!(await this.ensurePermission())) throw new Error('Graph is read only');
+      const directory = await this.directory('assets', true);
+      const original = safeFilename(preferredName);
+      const extension = original.match(/(\.[^.]+)$/)?.[1] || '';
+      const stem = extension ? original.slice(0, -extension.length) : original;
+      let name = original; let suffix = 1;
+      while (true) {
+        try { await directory.getFileHandle(name); name = `${stem}-${suffix++}${extension}`; }
+        catch (error) { if (error.name === 'NotFoundError') break; throw error; }
+      }
+      const handle = await directory.getFileHandle(name, { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(file); await writable.close();
+      return `/assets/${encodeURIComponent(name)}`;
+    }
+
+    async listAssets() {
+      const assets = [];
+      const walk = async (directory, prefix = 'assets') => {
+        for await (const [name, handle] of directory.entries()) {
+          const path = `${prefix}/${name}`;
+          if (handle.kind === 'directory') await walk(handle, path); else assets.push(path);
+        }
+      };
+      try { await walk(await this.directory('assets')); } catch (error) { if (error.name !== 'NotFoundError') throw error; }
+      return assets;
+    }
+
+    async removeAsset(reference) {
+      if (!(await this.ensurePermission())) throw new Error('Graph is read only');
+      const path = resolveAssetPath(reference);
+      if (!path.startsWith('assets/')) throw new Error('Invalid asset path');
+      const parts = path.split('/'); const directory = await this.directory(parts.slice(0, -1).join('/'));
+      await directory.removeEntry(parts.at(-1));
+      const url = this.assetUrls.get(path); if (url) URL.revokeObjectURL(url); this.assetUrls.delete(path);
+    }
+
     disposeAssets() {
       this.assetUrls.forEach(url => URL.revokeObjectURL(url)); this.assetUrls.clear();
     }
@@ -506,6 +546,35 @@
       return { content: payload.content, lastModified: payload.revision };
     }
 
+    async writeAsset(file, preferredName = safeFilename(file.name)) {
+      const name = safeFilename(preferredName);
+      const response = await fetch(`${this.baseUrl}/asset?path=${encodeURIComponent(`assets/${name}`)}`, {
+        method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Markd-Client': this.clientId }, body: file
+      });
+      if (!response.ok) {
+        let message = `Graph server error (${response.status})`; try { message = (await response.json()).error || message; } catch {}
+        if (response.status === 404 && message === 'Unknown graph endpoint') message = 'File uploads require a server.py restart';
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      return `/${payload.path.split('/').map(encodeURIComponent).join('/')}`;
+    }
+
+    async listAssets() {
+      const payload = await this.api('/assets');
+      return payload.files || [];
+    }
+
+    async removeAsset(reference) {
+      const path = resolveAssetPath(reference);
+      if (!path.startsWith('assets/')) throw new Error('Invalid asset path');
+      const response = await fetch(`${this.baseUrl}/asset?path=${encodeURIComponent(path)}`, { method: 'DELETE', headers: { 'X-Markd-Client': this.clientId } });
+      if (!response.ok) {
+        let message = `Graph server error (${response.status})`; try { message = (await response.json()).error || message; } catch {}
+        throw new Error(message);
+      }
+    }
+
     disposeAssets() {}
 
     async stats() {
@@ -540,6 +609,7 @@
       this.pageLinks = new Map();
       this.blockLinks = new Map();
       this.tagLinks = new Map();
+      this.referencedPages = new Map();
       this.sourcePages.forEach(page => this.addPage(page, this.contentOverrides.get(page.path) ?? page.content));
       return this;
     }
@@ -557,7 +627,7 @@
       const filename = page.name || page.path?.split('/').at(-1) || '';
       const filenameTitle = pageTitle('', filename);
       if (filenameTitle) this.pages.set(normalizePage(filenameTitle), page);
-      this.documents.set(key, document);
+      this.documents.set(page.path, document);
       if (page.journalDate) {
         const [year, month, day] = page.journalDate.split('-').map(Number); const date = new Date(year, month - 1, day);
         [page.journalDate, formatJournalDate(date, 'yyyy_MM_dd'), formatJournalDate(date, 'MMM do, yyyy'), formatJournalDate(date, 'MMMM do, yyyy')]
@@ -569,9 +639,15 @@
         const properties = propertiesFrom(block.content);
         const reference = { page, block, content: block.content };
         if (properties.id) { block.uuid = properties.id; this.uuids.set(normalizePage(properties.id), reference); }
-        pageReferences(block.content).forEach(target => this.addTo(this.pageLinks, target, reference));
+        pageReferences(block.content).forEach(target => {
+          this.addTo(this.pageLinks, target, reference);
+          const key = normalizePage(target); if (!this.referencedPages.has(key)) this.referencedPages.set(key, target);
+        });
         blockReferences(block.content).forEach(target => this.addTo(this.blockLinks, target, reference));
-        tags(block.content).forEach(tag => this.addTo(this.tagLinks, tag, reference));
+        tags(block.content).forEach(tag => {
+          this.addTo(this.tagLinks, tag, reference);
+          const key = normalizePage(tag); if (!this.referencedPages.has(key)) this.referencedPages.set(key, tag);
+        });
       }
       return document;
     }
@@ -597,14 +673,21 @@
       return [...new Map(references.map(item => [`${item.page.path}:${item.block.id}`, item])).values()];
     }
     referencesToBlock(uuid) { return this.blockLinks.get(normalizePage(uuid)) || []; }
-    allPages() { return [...new Set(this.pages.values())].sort((a, b) => a.title.localeCompare(b.title)); }
+    allPages() { return [...this.sourcePages].sort((a, b) => a.title.localeCompare(b.title)); }
+    pageSuggestions() {
+      const pages = [...this.allPages()];
+      for (const [key, title] of this.referencedPages) {
+        if (!this.pages.has(key)) pages.push({ title, name: '', path: `virtual:${key}`, folder: 'pages', content: '- ', lastModified: null, virtual: true });
+      }
+      return pages.sort((a, b) => a.title.localeCompare(b.title));
+    }
 
     search(query, limit = 30) {
       const needle = normalizePage(query);
       if (!needle) return [];
       const results = [];
       for (const page of this.allPages()) {
-        const document = this.documents.get(normalizePage(page.title));
+        const document = this.documents.get(page.path);
         for (const { block } of flattenBlocks(document?.blocks)) {
           if (normalizePage(block.content).includes(needle)) results.push({ page, block, content: block.content });
           if (results.length >= limit) return results;

@@ -219,6 +219,22 @@ class MarkdHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/assets/") and self.graph:
+            try:
+                target = self.graph_path(unquote(parsed.path.lstrip("/")))
+                if not target.is_file():
+                    raise FileNotFoundError(parsed.path)
+                content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(target.stat().st_size))
+                self.end_headers()
+                with target.open("rb") as source:
+                    while chunk := source.read(64 * 1024):
+                        self.wfile.write(chunk)
+                return
+            except (ValueError, OSError):
+                return self.error_json(HTTPStatus.NOT_FOUND, "Asset not found")
         if not parsed.path.startswith("/api/graph"):
             return super().do_GET()
         if not self.graph:
@@ -246,6 +262,10 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 return self.json_response({"files": files, "size": size, "lastModified": round(last_modified * 1000), "partial": skipped > 0})
             if parsed.path == "/api/graph/files":
                 return self.json_response({"files": self.scan_graph(), "config": journal_config(self.graph)})
+            if parsed.path == "/api/graph/assets":
+                root = self.graph / "assets"
+                files = [path.relative_to(self.graph).as_posix() for path in root.rglob("*") if path.is_file()] if root.is_dir() else []
+                return self.json_response({"files": sorted(files)})
             query = parse_qs(parsed.query)
             raw_path = query.get("path", [""])[0]
             if parsed.path == "/api/graph/file":
@@ -291,7 +311,40 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         return target.stat().st_mtime_ns
 
     def do_PUT(self) -> None:
-        if urlparse(self.path).path != "/api/graph/file":
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/graph/asset":
+            if not self.graph:
+                return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
+            try:
+                raw_path = parse_qs(parsed.query).get("path", [""])[0]
+                if not raw_path.startswith("assets/"):
+                    raise ValueError("Assets must be stored in assets/")
+                target = self.graph_path(raw_path)
+                original = target
+                suffix = 1
+                while target.exists():
+                    target = original.with_name(f"{original.stem}-{suffix}{original.suffix}")
+                    suffix += 1
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 0:
+                    raise ValueError("Invalid upload size")
+                content = self.rfile.read(length)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+                try:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(content); stream.flush(); os.fsync(stream.fileno())
+                    os.replace(temporary, target)
+                except Exception:
+                    try: os.unlink(temporary)
+                    except OSError: pass
+                    raise
+                relative = target.relative_to(self.graph).as_posix()
+                self.broker.publish({"type": "asset", "path": relative, "clientId": self.headers.get("X-Markd-Client")})
+                return self.json_response({"path": relative})
+            except (ValueError, OSError) as error:
+                return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
+        if parsed.path != "/api/graph/file":
             return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         try:
             payload = self.request_json()
@@ -312,6 +365,28 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             self.broker.publish({"type": "changed" if exists else "created", "path": relative, "revision": str(revision), "clientId": payload.get("clientId")})
             self.json_response({"path": relative, "revision": str(revision)})
         except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
+            self.error_json(HTTPStatus.BAD_REQUEST, str(error))
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/graph/asset":
+            return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
+        if not self.graph:
+            return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
+        try:
+            raw_path = parse_qs(parsed.query).get("path", [""])[0]
+            if not raw_path.startswith("assets/"):
+                raise ValueError("Assets must be stored in assets/")
+            target = self.graph_path(raw_path)
+            if not target.is_file():
+                raise FileNotFoundError(raw_path)
+            target.unlink()
+            relative = target.relative_to(self.graph).as_posix()
+            self.broker.publish({"type": "asset-deleted", "path": relative, "clientId": self.headers.get("X-Markd-Client")})
+            self.json_response({"path": relative})
+        except FileNotFoundError:
+            self.error_json(HTTPStatus.NOT_FOUND, "Asset not found")
+        except (ValueError, OSError) as error:
             self.error_json(HTTPStatus.BAD_REQUEST, str(error))
 
     def do_POST(self) -> None:

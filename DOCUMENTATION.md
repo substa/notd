@@ -34,7 +34,19 @@ Open the command palette with:
 - `F1`;
 - `:` in Vim Normal mode.
 
-Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, and open this documentation.
+Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, manage graph maintenance, and open this documentation.
+
+### Graph maintenance commands
+
+When a graph is open, the command palette also provides:
+
+| Command | What it does |
+| --- | --- |
+| **Open local graph** | Select a graph folder with browser filesystem access. |
+| **Sync all notes and backlinks** | Rescan every Markdown note and rebuild page, block, backlink, and autocomplete indexes. Use this after external changes that were not detected automatically. |
+| **Clean orphaned assets** | Scans `assets/` and lists files whose path does not occur in any Markdown note before asking for confirmation to delete them. The check is deliberately conservative, but review the displayed list and keep backups before confirming. |
+| **New graph page** | Create a Markdown page in `pages/`. |
+| **Close graph** | Return to the single-document editor. |
 
 ## Graphs
 
@@ -108,7 +120,7 @@ The task state can also be clicked directly.
 #tag
 ```
 
-Click a reference to open its page. A missing page is created when opened.
+Click a reference to open its page. A missing page opens as a virtual page so its backlinks can be viewed; a Markdown file is created only after you edit it.
 
 ### Block references
 
@@ -156,6 +168,7 @@ Previous journal pages appear below today's entry and load progressively while s
 | Insert yesterday's journal reference | `/yesterday` |
 | Insert tomorrow's journal reference | `/tomorrow` |
 | Insert a selected journal date | `/date picker` |
+| Upload an attachment to `assets/` and insert its Markdown link | `/upload` |
 | Previous page | `Alt + ←` |
 | Next page | `Alt + →` |
 
@@ -229,13 +242,14 @@ When running through `server.py`:
 
 ## Assets
 
-Images with graph-relative paths are loaded from the graph, for example:
+Use `/upload` inside a graph block to select any file. markd stores it in the graph root’s `assets/` directory, preserves the original name when available, and inserts a Markdown link; images use image Markdown automatically. If a filename already exists, markd appends `-1`, `-2`, and so on.
 
 ```markdown
-![Photo](../assets/photo.png)
+![Photo](/assets/photo.png)
+[Report](/assets/report.pdf)
 ```
 
-In LAN mode, assets are served by the graph API.
+Removing a link or its block does not delete the file. Run **Clean orphaned assets** from the command palette later to review and delete unreferenced uploads. The command displays the candidate filenames and requires confirmation. In LAN mode, assets are served by the graph API.
 
 ## Single-document editor
 
