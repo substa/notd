@@ -115,6 +115,16 @@ test('indexes namespaced page links and tags', () => {
   assert.equal(Graph.pageTitle('title:: nome', 'persone___nome.md'), 'persone/nome');
 });
 
+test('converts Logseq PDF embeds to regular attachment links', () => {
+  const markdown = '- ![verbale Scala firmato.pdf](../assets/verbale_Scala_firmato_1784561924481_0.pdf)\n';
+  const document = Graph.parseDocument(markdown);
+
+  assert.equal(
+    Graph.serializeDocument(document),
+    '- [verbale Scala firmato.pdf](../assets/verbale_Scala_firmato_1784561924481_0.pdf)\n'
+  );
+});
+
 test('resolves graph assets relative to the page folder', () => {
   assert.equal(Graph.resolveAssetPath('../assets/immagine.jpg', 'pages'), 'assets/immagine.jpg');
   assert.equal(Graph.resolveAssetPath('../assets/My%20image.jpg', 'journals'), 'assets/My image.jpg');
@@ -129,6 +139,21 @@ test('uses Logseq-compatible journal date formats', () => {
   assert.deepEqual([parsed.getFullYear(), parsed.getMonth(), parsed.getDate()], [2026, 6, 17]);
   const index = new Graph.GraphIndex([{ title: 'Jul 17th, 2026', path: 'journals/2026_07_17.md', journal: true, journalDate: '2026-07-17', content: '- entry' }]);
   assert.equal(index.resolvePage('2026_07_17').title, 'Jul 17th, 2026');
+});
+
+test('updates one page incrementally without losing overlapping page names', () => {
+  const first = { title: 'First', path: 'pages/first.md', content: 'alias:: Shared\n\n- [[Old]]\n' };
+  const second = { title: 'Second', path: 'pages/second.md', content: 'alias:: Shared\n\n- Keep me\n' };
+  const index = new Graph.GraphIndex([first, second]);
+
+  first.content = 'alias:: Shared\n\n- [[New]]\n';
+  index.updatePage(first, first.content);
+
+  assert.equal(index.referencesToPage('Old').length, 0);
+  assert.equal(index.pageSuggestions().some(page => page.title === 'Old'), false);
+  assert.equal(index.referencesToPage('New').length, 1);
+  assert.equal(index.search('Keep me').length, 1);
+  assert.equal(index.resolvePage('Shared').title, 'First');
 });
 
 test('updates page references without changing aliases', () => {

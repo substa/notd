@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Serve markd and an optional writable graph over HTTP.
 
-Use only on a trusted network. The graph API intentionally has no authentication.
+The graph API is intended for trusted local networks. Add application authentication
+before exposing the service beyond a controlled network.
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import mimetypes
 import os
@@ -20,8 +22,15 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, unquote, urlparse
 
-MAX_BODY = 32 * 1024 * 1024
+MAX_BODY = 8 * 1024 * 1024
+MAX_ASSET_BODY = 64 * 1024 * 1024
+MAX_GRAPH_FILES = 20_000
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
+STATIC_FILES = {
+    "/", "/index.html", "/styles.css", "/theme-config.css", "/graph.js", "/app.js",
+    "/DOCUMENTATION.md", "/manifest.webmanifest", "/icon.svg", "/sw.js",
+}
+SAFE_INLINE_ASSET_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
 
 
 class EventBroker:
@@ -65,11 +74,11 @@ class GraphWatcher(threading.Thread):
 
     def _scan(self) -> dict[str, str]:
         result: dict[str, str] = {}
-        candidates = [path for path in self.graph.iterdir() if path.is_file() and path.suffix.lower() in MARKDOWN_SUFFIXES]
+        candidates = [path for path in self.graph.iterdir() if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES]
         for folder_name in ("pages", "journals"):
             folder = self.graph / folder_name
             if folder.is_dir():
-                candidates.extend(path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in MARKDOWN_SUFFIXES)
+                candidates.extend(path for path in folder.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES)
         for path in candidates:
             try:
                 result[path.relative_to(self.graph).as_posix()] = str(path.stat().st_mtime_ns)
@@ -78,7 +87,11 @@ class GraphWatcher(threading.Thread):
         return result
 
     def run(self) -> None:
-        while not self.stopped.wait(0.75):
+        while True:
+            # Keep small graphs responsive without continuously walking very large ones.
+            interval = min(5.0, 0.75 + len(self.snapshot) / 5_000)
+            if self.stopped.wait(interval):
+                return
             with self.lock:
                 current = self._scan()
                 previous = self.snapshot
@@ -126,31 +139,66 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         return self.server.watcher  # type: ignore[attr-defined]
 
     def end_headers(self) -> None:
-        if self.path.startswith("/api/"):
+        route = urlparse(self.path).path
+        if route.startswith("/api/") or route.startswith("/assets/"):
             self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
+        elif route in {"/", "/index.html", "/sw.js"}:
+            self.send_header("Cache-Control", "no-cache")
+        else:
+            self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https: http:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
         super().end_headers()
 
+    def valid_write_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc == self.headers.get("Host", "")
+
+    def require_api_access(self, parsed, write: bool = False) -> bool:
+        if write and not self.valid_write_origin():
+            self.error_json(HTTPStatus.FORBIDDEN, "Invalid request origin")
+            return False
+        return True
+
     def send_head(self):
-        """Serve the SPA shell for clean graph-page routes."""
+        """Serve only public application files and the SPA shell."""
         original_path = self.path
         route = urlparse(original_path).path
         if re.match(r"^/(?:pages|journals)/[^/].*", route):
-            self.path = "/index.html"
+            route = "/index.html"
+        if route not in STATIC_FILES:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return None
+        self.path = route
         try:
             return super().send_head()
         finally:
             self.path = original_path
 
     def json_response(self, payload: object, status: int = HTTPStatus.OK) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        compressed = len(body) >= 1024 and "gzip" in self.headers.get("Accept-Encoding", "").lower()
+        if compressed:
+            body = gzip.compress(body, compresslevel=4)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if compressed:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def error_json(self, status: int, message: str) -> None:
+        # A rejected request may still have an unread body; do not reuse that HTTP/1.1
+        # connection or the remaining bytes could be parsed as a second request.
+        self.close_connection = True
         self.json_response({"error": message}, status)
 
     def graph_path(self, raw_path: str, markdown_only: bool = False) -> Path:
@@ -166,32 +214,56 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         return target
 
     def request_json(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ValueError("Invalid request size") from error
         if length <= 0 or length > MAX_BODY:
             raise ValueError("Invalid request size")
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON body must be an object")
+        return payload
 
     def scan_graph(self) -> list[dict]:
         assert self.graph
         candidates: list[Path] = []
-        candidates.extend(path for path in self.graph.iterdir() if path.is_file() and path.suffix.lower() in MARKDOWN_SUFFIXES)
+        candidates.extend(path for path in self.graph.iterdir() if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES)
         for folder_name in ("pages", "journals"):
             folder = self.graph / folder_name
             if folder.is_dir():
-                candidates.extend(path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in MARKDOWN_SUFFIXES)
+                candidates.extend(path for path in folder.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES)
+        unique = sorted(set(candidates))
+        if len(unique) > MAX_GRAPH_FILES:
+            raise ValueError(f"Graph contains more than {MAX_GRAPH_FILES} Markdown files")
         files = []
-        for path in sorted(set(candidates)):
+        cache = self.server.file_cache  # type: ignore[attr-defined]
+        cache_lock = self.server.file_cache_lock  # type: ignore[attr-defined]
+        active_keys = set()
+        for path in unique:
             try:
                 stat = path.stat()
+                if stat.st_size > MAX_BODY:
+                    continue
+                relative = path.relative_to(self.graph).as_posix()
+                key = (relative, stat.st_mtime_ns, stat.st_size)
+                active_keys.add(key)
+                with cache_lock:
+                    content = cache.get(key)
+                if content is None:
+                    content = path.read_text(encoding="utf-8")
+                    with cache_lock:
+                        cache[key] = content
                 files.append({
-                    "path": path.relative_to(self.graph).as_posix(),
-                    "name": path.name,
+                    "path": relative, "name": path.name,
                     "folder": path.parent.relative_to(self.graph).as_posix() if path.parent != self.graph else "",
-                    "content": path.read_text(encoding="utf-8"),
-                    "revision": str(stat.st_mtime_ns),
+                    "content": content, "revision": str(stat.st_mtime_ns),
                 })
             except (OSError, UnicodeError):
                 continue
+        with cache_lock:
+            for key in cache.keys() - active_keys:
+                cache.pop(key, None)
         return files
 
     def stream_events(self) -> None:
@@ -219,14 +291,18 @@ class MarkdHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if (parsed.path.startswith("/assets/") or parsed.path.startswith("/api/graph")) and not self.require_api_access(parsed):
+            return
         if parsed.path.startswith("/assets/") and self.graph:
             try:
                 target = self.graph_path(unquote(parsed.path.lstrip("/")))
                 if not target.is_file():
                     raise FileNotFoundError(parsed.path)
                 content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+                inline = content_type in SAFE_INLINE_ASSET_TYPES
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Type", content_type if inline else "application/octet-stream")
+                self.send_header("Content-Disposition", "inline" if inline else f"attachment; filename={json.dumps(target.name)}")
                 self.send_header("Content-Length", str(target.stat().st_size))
                 self.end_headers()
                 with target.open("rb") as source:
@@ -252,7 +328,11 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 for root, _, names in os.walk(self.graph, onerror=lambda _: None):
                     for name in names:
                         try:
-                            stat = (Path(root) / name).stat()
+                            candidate = Path(root) / name
+                            if candidate.is_symlink():
+                                skipped += 1
+                                continue
+                            stat = candidate.stat()
                         except OSError:
                             skipped += 1
                             continue
@@ -264,7 +344,7 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 return self.json_response({"files": self.scan_graph(), "config": journal_config(self.graph)})
             if parsed.path == "/api/graph/assets":
                 root = self.graph / "assets"
-                files = [path.relative_to(self.graph).as_posix() for path in root.rglob("*") if path.is_file()] if root.is_dir() else []
+                files = [path.relative_to(self.graph).as_posix() for path in root.rglob("*") if path.is_file() and not path.is_symlink()] if root.is_dir() else []
                 return self.json_response({"files": sorted(files)})
             query = parse_qs(parsed.query)
             raw_path = query.get("path", [""])[0]
@@ -277,8 +357,10 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 if not target.is_file():
                     raise FileNotFoundError(raw_path)
                 content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+                inline = content_type in SAFE_INLINE_ASSET_TYPES
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Type", content_type if inline else "application/octet-stream")
+                self.send_header("Content-Disposition", "inline" if inline else f"attachment; filename={json.dumps(target.name)}")
                 self.send_header("Content-Length", str(target.stat().st_size))
                 self.end_headers()
                 with target.open("rb") as source:
@@ -310,8 +392,44 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             raise
         return target.stat().st_mtime_ns
 
+    def write_markdown(self, target: Path, payload: dict) -> tuple[bool, str, int]:
+        with self.server.mutation_lock:  # type: ignore[attr-defined]
+            exists = target.exists()
+            if not exists and not payload.get("create"):
+                raise FileNotFoundError(target.name)
+            expected = payload.get("expectedRevision")
+            if exists and not payload.get("force") and expected is not None and target.stat().st_mtime_ns != int(expected):
+                raise FileExistsError("revision conflict")
+            relative = target.relative_to(self.graph).as_posix()  # type: ignore[arg-type]
+            if self.watcher:
+                with self.watcher.lock:
+                    revision = self.atomic_write(target, str(payload.get("content", "")))
+                    self.watcher.snapshot[relative] = str(revision)
+            else:
+                revision = self.atomic_write(target, str(payload.get("content", "")))
+            return exists, relative, revision
+
+    def write_asset(self, target: Path, content: bytes) -> Path:
+        with self.server.mutation_lock:  # type: ignore[attr-defined]
+            original = target; suffix = 1
+            while target.exists():
+                target = original.with_name(f"{original.stem}-{suffix}{original.suffix}"); suffix += 1
+            target.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(content); stream.flush(); os.fsync(stream.fileno())
+                os.replace(temporary, target)
+            except Exception:
+                try: os.unlink(temporary)
+                except OSError: pass
+                raise
+            return target
+
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
+        if not self.require_api_access(parsed, write=True):
+            return
         if parsed.path == "/api/graph/asset":
             if not self.graph:
                 return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
@@ -320,25 +438,16 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 if not raw_path.startswith("assets/"):
                     raise ValueError("Assets must be stored in assets/")
                 target = self.graph_path(raw_path)
-                original = target
-                suffix = 1
-                while target.exists():
-                    target = original.with_name(f"{original.stem}-{suffix}{original.suffix}")
-                    suffix += 1
-                length = int(self.headers.get("Content-Length", "0"))
-                if length < 0:
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError as error:
+                    raise ValueError("Invalid upload size") from error
+                if length <= 0 or length > MAX_ASSET_BODY:
                     raise ValueError("Invalid upload size")
                 content = self.rfile.read(length)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
-                try:
-                    with os.fdopen(descriptor, "wb") as stream:
-                        stream.write(content); stream.flush(); os.fsync(stream.fileno())
-                    os.replace(temporary, target)
-                except Exception:
-                    try: os.unlink(temporary)
-                    except OSError: pass
-                    raise
+                if len(content) != length:
+                    raise ValueError("Incomplete upload")
+                target = self.write_asset(target, content)
                 relative = target.relative_to(self.graph).as_posix()
                 self.broker.publish({"type": "asset", "path": relative, "clientId": self.headers.get("X-Markd-Client")})
                 return self.json_response({"path": relative})
@@ -349,26 +458,20 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         try:
             payload = self.request_json()
             target = self.graph_path(str(payload.get("path", "")), markdown_only=True)
-            exists = target.exists()
-            if not exists and not payload.get("create"):
-                return self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
-            expected = payload.get("expectedRevision")
-            if exists and not payload.get("force") and expected is not None and target.stat().st_mtime_ns != int(expected):
-                return self.error_json(HTTPStatus.CONFLICT, "The file changed on disk")
-            relative = target.relative_to(self.graph).as_posix()
-            if self.watcher:
-                with self.watcher.lock:
-                    revision = self.atomic_write(target, str(payload.get("content", "")))
-                    self.watcher.snapshot[relative] = str(revision)
-            else:
-                revision = self.atomic_write(target, str(payload.get("content", "")))
+            exists, relative, revision = self.write_markdown(target, payload)
             self.broker.publish({"type": "changed" if exists else "created", "path": relative, "revision": str(revision), "clientId": payload.get("clientId")})
             self.json_response({"path": relative, "revision": str(revision)})
+        except FileNotFoundError:
+            self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
+        except FileExistsError:
+            self.error_json(HTTPStatus.CONFLICT, "The file changed on disk")
         except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
             self.error_json(HTTPStatus.BAD_REQUEST, str(error))
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
+        if not self.require_api_access(parsed, write=True):
+            return
         if parsed.path != "/api/graph/asset":
             return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         if not self.graph:
@@ -378,9 +481,10 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             if not raw_path.startswith("assets/"):
                 raise ValueError("Assets must be stored in assets/")
             target = self.graph_path(raw_path)
-            if not target.is_file():
-                raise FileNotFoundError(raw_path)
-            target.unlink()
+            with self.server.mutation_lock:  # type: ignore[attr-defined]
+                if not target.is_file():
+                    raise FileNotFoundError(raw_path)
+                target.unlink()
             relative = target.relative_to(self.graph).as_posix()
             self.broker.publish({"type": "asset-deleted", "path": relative, "clientId": self.headers.get("X-Markd-Client")})
             self.json_response({"path": relative})
@@ -390,28 +494,32 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             self.error_json(HTTPStatus.BAD_REQUEST, str(error))
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/graph/rename":
+        parsed = urlparse(self.path)
+        if not self.require_api_access(parsed, write=True):
+            return
+        if parsed.path != "/api/graph/rename":
             return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         try:
             payload = self.request_json()
             source = self.graph_path(str(payload.get("source", "")), markdown_only=True)
             target = self.graph_path(str(payload.get("target", "")), markdown_only=True)
-            if target.exists() and target != source:
-                return self.error_json(HTTPStatus.CONFLICT, "A page with this name already exists")
-            expected = payload.get("expectedRevision")
-            if expected is not None and source.stat().st_mtime_ns != int(expected):
-                return self.error_json(HTTPStatus.CONFLICT, "The file changed on disk")
-            source_relative = source.relative_to(self.graph).as_posix(); target_relative = target.relative_to(self.graph).as_posix()
-            if self.watcher:
-                with self.watcher.lock:
+            with self.server.mutation_lock:  # type: ignore[attr-defined]
+                if target.exists() and target != source:
+                    return self.error_json(HTTPStatus.CONFLICT, "A page with this name already exists")
+                expected = payload.get("expectedRevision")
+                if expected is not None and source.stat().st_mtime_ns != int(expected):
+                    return self.error_json(HTTPStatus.CONFLICT, "The file changed on disk")
+                source_relative = source.relative_to(self.graph).as_posix(); target_relative = target.relative_to(self.graph).as_posix()
+                if self.watcher:
+                    with self.watcher.lock:
+                        revision = self.atomic_write(target, str(payload.get("content", "")))
+                        if source != target:
+                            source.unlink(); self.watcher.snapshot.pop(source_relative, None)
+                        self.watcher.snapshot[target_relative] = str(revision)
+                else:
                     revision = self.atomic_write(target, str(payload.get("content", "")))
                     if source != target:
-                        source.unlink(); self.watcher.snapshot.pop(source_relative, None)
-                    self.watcher.snapshot[target_relative] = str(revision)
-            else:
-                revision = self.atomic_write(target, str(payload.get("content", "")))
-                if source != target:
-                    source.unlink()
+                        source.unlink()
             self.broker.publish({"type": "renamed", "path": target_relative, "oldPath": source_relative, "revision": str(revision), "clientId": payload.get("clientId")})
             self.json_response({"path": target_relative, "revision": str(revision)})
         except FileNotFoundError:
@@ -431,7 +539,6 @@ def main() -> None:
     graph = arguments.graph.expanduser().resolve() if arguments.graph else None
     if graph and not graph.is_dir():
         parser.error(f"Graph directory does not exist: {graph}")
-
     def handler(*args, **kwargs):
         return MarkdHandler(*args, directory=str(app_directory), **kwargs)
 
@@ -439,13 +546,16 @@ def main() -> None:
     server.graph = graph  # type: ignore[attr-defined]
     server.broker = EventBroker()  # type: ignore[attr-defined]
     server.watcher = GraphWatcher(graph, server.broker) if graph else None  # type: ignore[attr-defined]
+    server.file_cache = {}  # type: ignore[attr-defined]
+    server.file_cache_lock = threading.Lock()  # type: ignore[attr-defined]
+    server.mutation_lock = threading.Lock()  # type: ignore[attr-defined]
     if server.watcher:
         server.watcher.start()
     location = f"http://{arguments.host}:{arguments.port}"
     print(f"markd: {location}")
     print(f"graph: {graph if graph else 'disabled'}")
-    if arguments.host not in {"127.0.0.1", "localhost", "::1"}:
-        print("warning: the writable graph is available without authentication; use only on a trusted LAN")
+    if arguments.host not in {"127.0.0.1", "localhost", "::1"} and graph:
+        print("warning: the writable graph has no authentication; use only on a trusted LAN")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

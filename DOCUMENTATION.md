@@ -23,7 +23,7 @@ python3 server.py \
 
 Open `http://localhost:4176` on the server or `http://SERVER-IP:4176` from another device. Every client reads and writes the same files.
 
-> The LAN server has no authentication. Use it only on a trusted network and never expose its port to the internet.
+> The graph API currently has no application authentication. Use it only on a trusted network and do not expose it directly to the internet. Username/password authentication should be added before public deployment.
 
 ## Command palette
 
@@ -62,7 +62,7 @@ logseq/
   config.edn
 ```
 
-markd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates.
+markd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Logseq `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
 
 ### Open a page
 
@@ -173,6 +173,13 @@ Previous journal pages appear below today's entry and load progressively while s
 | Next page | `Alt + →` |
 
 Type `/` inside a graph block to show the inline command menu directly below the block. Journal commands insert `[[page references]]`; the date picker only selects and inserts a date and does not navigate away from the current page.
+
+Type `<` to use structural insertion commands:
+
+| Command | Result |
+| --- | --- |
+| `<quote` | Inserts an Org-style `#+BEGIN_QUOTE` / `#+END_QUOTE` block and places the caret inside it. |
+| `<src` | Inserts a fenced Markdown code block and places the caret inside it. An optional language is supported, for example `<src javascript`. |
 
 ## Vim mode
 
@@ -302,11 +309,12 @@ In local mode, content is not sent to external services. In LAN mode, content is
 
 The LAN server:
 
-- has no authentication;
-- does not enable CORS;
-- restricts file access to the configured graph;
-- uses atomic writes;
-- must be used only on a trusted network.
+- currently has no application authentication and is limited to trusted networks;
+- rejects cross-origin browser writes and does not enable CORS;
+- exposes only allowlisted application files and restricts graph access to the configured directory;
+- blocks graph symlinks from bulk scans, limits uploads and note sizes, and serves unsafe attachments as downloads;
+- uses atomic writes and restrictive browser security headers;
+- must still use HTTPS through a reverse proxy before internet exposure.
 
 Back up the graph regularly, especially before bulk renames or concurrent editing from multiple applications.
 

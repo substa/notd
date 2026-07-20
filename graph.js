@@ -62,6 +62,14 @@
     return width;
   }
 
+  function normalizePdfEmbeds(markdown = '') {
+    return String(markdown).replace(/!\[([^\]]*)\]\(([^\s)]+)(\s+["'][^"']*["'])?\)/gi, (whole, label, url, title = '') => {
+      let path = url.split(/[?#]/)[0];
+      try { path = decodeURIComponent(path); } catch {}
+      return /\.pdf$/i.test(path) ? `[${label}](${url}${title})` : whole;
+    });
+  }
+
   function propertiesFrom(text) {
     const properties = {};
     for (const match of text.matchAll(/^\s*([\w-]+)::\s*(.*?)\s*$/gm)) properties[match[1].toLowerCase()] = match[2];
@@ -69,7 +77,7 @@
   }
 
   function parseDocument(markdown = '') {
-    const source = markdown.replace(/\r\n?/g, '\n');
+    const source = normalizePdfEmbeds(markdown).replace(/\r\n?/g, '\n');
     const lines = source.split('\n');
     const indents = lines.map(line => line.match(/^([ \t]*)[-+*]\s/)?.[1]).filter(value => value && indentationWidth(value));
     const unit = Math.max(1, Math.min(4, ...indents.map(indentationWidth), 2));
@@ -620,14 +628,11 @@
       map.get(normalized).push(value);
     }
 
-    addPage(page, content) {
-      const key = normalizePage(page.title);
-      const document = parseDocument(content);
-      this.pages.set(key, page);
+    registerPageNames(page, document) {
+      this.pages.set(normalizePage(page.title), page);
       const filename = page.name || page.path?.split('/').at(-1) || '';
       const filenameTitle = pageTitle('', filename);
       if (filenameTitle) this.pages.set(normalizePage(filenameTitle), page);
-      this.documents.set(page.path, document);
       if (page.journalDate) {
         const [year, month, day] = page.journalDate.split('-').map(Number); const date = new Date(year, month - 1, day);
         [page.journalDate, formatJournalDate(date, 'yyyy_MM_dd'), formatJournalDate(date, 'MMM do, yyyy'), formatJournalDate(date, 'MMMM do, yyyy')]
@@ -635,6 +640,12 @@
       }
       const pageProperties = propertiesFrom(document.preamble.join('\n'));
       for (const alias of String(pageProperties.alias || '').split(',').map(item => item.trim().replace(/^\[\[|\]\]$/g, '')).filter(Boolean)) this.pages.set(normalizePage(alias), page);
+    }
+
+    addPage(page, content) {
+      const document = parseDocument(content);
+      this.registerPageNames(page, document);
+      this.documents.set(page.path, document);
       for (const { block } of flattenBlocks(document.blocks)) {
         const properties = propertiesFrom(block.content);
         const reference = { page, block, content: block.content };
@@ -659,9 +670,25 @@
 
     updatePage(page, content) {
       this.contentOverrides.set(page.path, content);
-      const pages = this.sourcePages.filter(item => item.path !== page.path);
-      pages.push(page);
-      this.rebuild(pages);
+      const path = page.path;
+      this.sourcePages = this.sourcePages.filter(item => item.path !== path);
+      this.sourcePages.push(page);
+      for (const map of [this.pageLinks, this.blockLinks, this.tagLinks]) {
+        for (const [key, references] of map) {
+          const remaining = references.filter(reference => reference.page.path !== path);
+          if (remaining.length) map.set(key, remaining); else map.delete(key);
+        }
+      }
+      for (const [key, reference] of this.uuids) if (reference.page.path === path) this.uuids.delete(key);
+      this.documents.delete(path);
+      this.addPage(page, content);
+      for (const key of this.referencedPages.keys()) {
+        if (!this.pageLinks.has(key) && !this.tagLinks.has(key)) this.referencedPages.delete(key);
+      }
+      // Re-register aliases without reparsing every document. This preserves overlap
+      // semantics while making a keystroke update proportional to index size, not file size.
+      this.pages.clear();
+      for (const candidate of this.sourcePages) this.registerPageNames(candidate, this.documents.get(candidate.path));
     }
 
     resolvePage(title) { return this.pages.get(normalizePage(title)); }
@@ -720,7 +747,7 @@
 
   window.MarkdGraph = {
     GraphStore, RemoteGraphStore, GraphIndex, ConflictError, parseDocument, serializeDocument, flattenBlocks,
-    propertiesFrom, pageReferences, blockReferences, pageTitle, normalizePage, resolveAssetPath, replacePageReferences,
+    propertiesFrom, pageReferences, blockReferences, pageTitle, normalizePage, resolveAssetPath, replacePageReferences, normalizePdfEmbeds,
     saveDraft, getDraft, removeDraft, journalInfo, formatJournalDate, parseJournalDate, newId
   };
 })();

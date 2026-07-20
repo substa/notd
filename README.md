@@ -23,7 +23,9 @@ python3 server.py \
 
 Open `http://localhost:4176` on the host or `http://192.168.1.10:4176` from another device. The app detects the server graph automatically; every client reads and writes the same Markdown files. Server-Sent Events propagate saves immediately to the other clients, while a lightweight watcher detects edits made directly by Logseq within about one second. Autosave and conflict detection remain active.
 
-The API has no authentication. Bind to `0.0.0.0` only on a trusted LAN and do not expose this port to the internet. The default host is `127.0.0.1`.
+The graph API currently has no application authentication. Bind it beyond localhost only on a trusted, controlled LAN and do not expose it directly to the internet. Username/password authentication can be added before public deployment. The default host remains `127.0.0.1`.
+
+The server still exposes only the application allowlist (not repository/source files), rejects cross-origin browser writes, applies restrictive browser security headers, limits request and graph-file sizes, uses atomic writes, and caches unchanged Markdown reads. API JSON responses are compressed when supported.
 
 Run the graph parser/index tests with:
 
@@ -58,7 +60,9 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - graph-wide page switching and block search from the command palette;
 - graph index resync and conservative orphaned-asset cleanup commands;
 - `/upload` attachments saved under the graph’s `assets/` directory;
+- `<quote` and `<src` inline commands for quickly inserting quotes and fenced code blocks;
 - clean, copyable client-side URLs such as `/pages/page-name` and `/journals/2026_07_18`, with browser back/forward navigation;
+- incremental in-browser index updates, avoiding a full graph reparse after each edit;
 - daily journals and safe page renaming with optional reference updates;
 - complete built-in documentation, always available with `?` or from the command palette.
 
