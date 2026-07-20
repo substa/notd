@@ -157,7 +157,7 @@ markd reads these settings from `logseq/config.edn`:
 :journal/page-title-format
 ```
 
-Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page.
+Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page. When previous-year entries exist, the bottom of today's page shows an **on this day** link that expands a timeline of all top-level blocks created on the same month and day in previous years. Blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline.
 
 ### Journal commands
 

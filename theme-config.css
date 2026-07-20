@@ -300,7 +300,8 @@ body {
 .journal-heading:hover,
 .theme-sepia .journal-heading:hover,
 .theme-dark .journal-heading:hover { color: var(--accent); }
-.journal-task-summary {
+.journal-task-summary,
+.on-this-day-toggle {
   color: color-mix(in srgb, var(--text) 72%, var(--bg));
   font: 500 17px/1.5 var(--body);
   letter-spacing: 0;

@@ -27,7 +27,7 @@
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
     vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
     graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
-    journalMode: false, journalLimit: 1, referencesExpanded: false, taskView: null, taskLimits: {}, taskExpanded: {}
+    journalMode: false, journalLimit: 1, referencesExpanded: false, onThisDayExpanded: false, taskView: null, taskLimits: {}, taskExpanded: {}
   };
   let journalDocuments = new Map();
   let graphHistory = [];
@@ -655,6 +655,52 @@ Open, save, export, and reach recent documents or headings from the command pale
     }).join('') : '<p class="task-dashboard-empty">No tasks</p>';
   }
 
+  function onThisDayPages(date = new Date()) {
+    const monthDay = MarkdGraph.formatJournalDate(date, 'MM-dd');
+    const currentYear = date.getFullYear();
+    return (graphStore?.pages || []).filter(page => {
+      if (!page.journalDate || page.journalDate.slice(5) !== monthDay) return false;
+      return Number(page.journalDate.slice(0, 4)) < currentYear;
+    }).sort((a, b) => b.journalDate.localeCompare(a.journalDate));
+  }
+
+  function onThisDayElement() {
+    const histories = onThisDayPages().map(page => ({
+      page,
+      blocks: cachedJournalDocument(page).blocks.filter(block => !/(^|\s)#worklog\b/i.test(block.content) && block.content.split('\n').some(line => line.trim() && !/^\s*[\w-]+::/.test(line)))
+    })).filter(history => history.blocks.length);
+    if (!histories.length) return null;
+    const wrapper = document.createElement('section'); wrapper.className = 'on-this-day';
+    const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'on-this-day-toggle'; toggle.dataset.onThisDayToggle = '';
+    toggle.setAttribute('aria-expanded', String(state.onThisDayExpanded));
+    toggle.textContent = 'on this day'; wrapper.append(toggle);
+    if (!state.onThisDayExpanded) return wrapper;
+    const list = document.createElement('div'); list.className = 'on-this-day-list';
+    for (const { page, blocks } of histories) {
+      const group = document.createElement('section'); group.className = 'on-this-day-year';
+      const year = document.createElement('button'); year.type = 'button'; year.className = 'on-this-day-year-link'; year.dataset.journalPage = page.path; year.textContent = page.journalDate.slice(0, 4); group.append(year);
+      for (const block of blocks) {
+        const item = document.createElement('article'); item.className = 'on-this-day-item'; item.dataset.pagePath = page.path;
+        const point = document.createElement('button'); point.type = 'button'; point.className = 'on-this-day-point';
+        point.dataset.onThisDayPage = page.path; point.dataset.onThisDayBlock = block.id; point.setAttribute('aria-label', `Open ${page.title}`);
+        const content = graphContentElement(block, page); content.classList.add('on-this-day-content');
+        item.append(point, content); group.append(item);
+      }
+      list.append(group);
+    }
+    wrapper.append(list); return wrapper;
+  }
+
+  function scrollOnThisDayIntoView() {
+    const section = $('.on-this-day', blockTree); if (!section) return;
+    const viewport = markdWrap.getBoundingClientRect(); const bounds = section.getBoundingClientRect();
+    let delta = 0;
+    if (bounds.height > viewport.height) delta = bounds.top - viewport.top;
+    else if (bounds.bottom > viewport.bottom) delta = bounds.bottom - viewport.bottom + 12;
+    else if (bounds.top < viewport.top) delta = bounds.top - viewport.top;
+    if (Math.abs(delta) > 1) markdWrap.scrollTo({ top: Math.max(0, markdWrap.scrollTop + delta), behavior: 'smooth' });
+  }
+
   function journalTaskPanelElement() {
     const groups = taskGroups(); const panel = document.createElement('section'); panel.className = 'journal-task-panel';
     const tomorrowDate = taskDate(1);
@@ -756,7 +802,11 @@ Open, save, export, and reach recent documents or headings from the command pale
         }
         const preamble = visibleGraphPreamble(journalDocument.preamble);
         if (preamble) { const properties = document.createElement('div'); properties.className = 'journal-preamble'; properties.textContent = preamble; section.append(properties); }
-        const tree = document.createElement('div'); tree.className = 'journal-blocks'; tree.append(renderBlocks(journalDocument.blocks, page)); section.append(tree); fragment.append(section);
+        const tree = document.createElement('div'); tree.className = 'journal-blocks'; tree.append(renderBlocks(journalDocument.blocks, page)); section.append(tree);
+        if (page.journalDate === today) {
+          const history = onThisDayElement(); if (history) section.append(history);
+        }
+        fragment.append(section);
       }
       if (pages.length < orderedJournalPages().length) {
         const more = document.createElement('div'); more.className = 'journal-more'; more.dataset.journalMore = ''; fragment.append(more);
@@ -1012,7 +1062,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
     recordGraphHistory(page, options);
     state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
-    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false;
+    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false; state.onThisDayExpanded = false;
     state.taskView = page.name.toLowerCase() === 'tasks.md' ? 'all' : null;
     if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
@@ -3015,7 +3065,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const scheduledDate = event.target.closest('[data-scheduled-block]');
     if (scheduledDate) {
       event.preventDefault(); event.stopPropagation();
-      const pagePath = scheduledDate.dataset.scheduledPage || scheduledDate.closest('.block-node')?.dataset.pagePath;
+      const pagePath = scheduledDate.dataset.scheduledPage || scheduledDate.closest('.block-node, .on-this-day-item')?.dataset.pagePath;
       const blockId = scheduledDate.dataset.scheduledBlock; const initialDate = `${scheduledDate.dataset.scheduledDate}T12:00:00`;
       toggleJournalCalendar(date => updateScheduledDate(pagePath, blockId, date).catch(error => toast(error.message || 'Could not update the scheduled date')), scheduledDate.getBoundingClientRect(), initialDate);
       return;
@@ -3041,10 +3091,22 @@ Open, save, export, and reach recent documents or headings from the command pale
       const page = graphStore?.pages.find(item => item.path === taskSource.dataset.taskPage);
       if (page) loadGraphPage(page, { blockId: taskSource.dataset.taskBlockId }); return;
     }
+    const onThisDayBlock = event.target.closest('[data-on-this-day-page]');
+    if (onThisDayBlock) {
+      const page = graphStore?.pages.find(item => item.path === onThisDayBlock.dataset.onThisDayPage);
+      if (page) await loadGraphPage(page, { blockId: onThisDayBlock.dataset.onThisDayBlock });
+      return;
+    }
+    if (event.target.closest('[data-on-this-day-toggle]')) {
+      const expanding = !state.onThisDayExpanded;
+      state.onThisDayExpanded = expanding; renderGraphPage();
+      if (expanding) requestAnimationFrame(scrollOnThisDayIntoView);
+      return;
+    }
     const journalHeading = event.target.closest('[data-journal-page]');
     if (journalHeading) { openSingleJournalPage(journalHeading.dataset.journalPage); return; }
     if (event.target.closest('[data-journal-more]')) { state.journalLimit += 8; renderGraphPage(); return; }
-    const blockNode = event.target.closest('.block-node'); const pagePath = blockNode?.dataset.pagePath;
+    const blockNode = event.target.closest('.block-node, .on-this-day-item'); const pagePath = blockNode?.dataset.pagePath;
     const task = event.target.closest('[data-task-block]');
     if (task) {
       if (state.journalMode && pagePath && pagePath !== state.graphPage.path) activateJournalBlock(pagePath, task.dataset.taskBlock, 'task');
