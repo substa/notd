@@ -356,21 +356,58 @@
     }
 
     async renamePage(page, title, content) {
-      const duplicate = this.findPage(title);
-      if (duplicate && duplicate !== page) throw new Error('A page with this name already exists');
+      const duplicate = this.pages.find(candidate => candidate !== page && normalizePage(candidate.title) === normalizePage(title));
+      if (duplicate) throw new Error('A page with this name already exists');
       const folder = page.folder || 'pages';
       const directory = await this.directory(folder, true);
       const name = `${safeFilename(title)}.md`;
       if (name === page.name) { await this.writePage(page, content); page.title = title; return page; }
-      const handle = await directory.getFileHandle(name, { create: true });
+      let handle = await directory.getFileHandle(name, { create: true });
+      const sameEntry = typeof handle.isSameEntry === 'function' && await handle.isSameEntry(page.handle);
+      if (sameEntry) {
+        // Case-insensitive filesystems return the original handle for a case-only
+        // filename change. Move through a temporary file so removing the old name
+        // does not also remove the newly written page.
+        const temporaryName = `.markd-case-rename-${newId()}.tmp`;
+        const temporaryHandle = await directory.getFileHandle(temporaryName, { create: true });
+        const temporaryPage = { ...page, name: temporaryName, path: `${folder}/${temporaryName}`, handle: temporaryHandle, lastModified: 0 };
+        await this.writePage(temporaryPage, content, { force: true });
+        await directory.removeEntry(page.name);
+        try {
+          handle = await directory.getFileHandle(name, { create: true });
+          const replacement = { ...page, title, name, path: `${folder}/${name}`, handle, lastModified: 0 };
+          await this.writePage(replacement, content, { force: true });
+        } catch (error) {
+          try {
+            const recovery = await directory.getFileHandle(page.name, { create: true });
+            await this.writePage({ ...page, handle: recovery, lastModified: 0 }, content, { force: true });
+          } catch { throw new Error(`Could not rename the page; recovery copy kept as ${temporaryName}`); }
+          await directory.removeEntry(temporaryName).catch(() => {});
+          throw error;
+        }
+        await directory.removeEntry(temporaryName);
+      }
       const renamed = { ...page, title, name, path: `${folder}/${name}`, handle, lastModified: 0 };
-      await this.writePage(renamed, content, { force: true });
-      await directory.removeEntry(page.name);
+      if (!sameEntry) await this.writePage(renamed, content, { force: true });
+      if (!sameEntry) await directory.removeEntry(page.name);
+      else {
+        const updated = await handle.getFile(); renamed.content = content; renamed.lastModified = updated.lastModified;
+      }
       this.pages = this.pages.filter(item => item !== page);
       this.pages.push(renamed);
       this.pages.sort((a, b) => a.title.localeCompare(b.title));
       await removeDraft(page.path).catch(() => {});
       return renamed;
+    }
+
+    async deletePage(page) {
+      if (!(await this.ensurePermission())) throw new Error('Graph is read only');
+      const file = await page.handle.getFile();
+      if (page.lastModified && file.lastModified !== page.lastModified && await file.text() !== page.content) throw new ConflictError();
+      const directory = await this.directory(page.folder || '');
+      await directory.removeEntry(page.name);
+      this.pages = this.pages.filter(item => item !== page);
+      await removeDraft(page.path).catch(() => {});
     }
 
     async freshFile(page) {
@@ -537,7 +574,8 @@
     }
 
     async renamePage(page, title, content) {
-      const duplicate = this.findPage(title); if (duplicate && duplicate !== page) throw new Error('A page with this name already exists');
+      const duplicate = this.pages.find(candidate => candidate !== page && normalizePage(candidate.title) === normalizePage(title));
+      if (duplicate) throw new Error('A page with this name already exists');
       const folder = page.folder || 'pages'; const name = `${safeFilename(title)}.md`; const target = `${folder}/${name}`;
       if (target === page.path) { await this.writePage(page, content); page.title = title; return page; }
       const payload = await this.api('/rename', {
@@ -547,6 +585,15 @@
       const renamed = { ...page, title, name, path: payload.path, content, lastModified: payload.revision };
       this.pages = this.pages.filter(item => item !== page); this.pages.push(renamed); this.pages.sort((a, b) => a.title.localeCompare(b.title));
       await removeDraft(page.path).catch(() => {}); return renamed;
+    }
+
+    async deletePage(page) {
+      await this.api('/file', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: page.path, expectedRevision: page.lastModified, clientId: this.clientId })
+      });
+      this.pages = this.pages.filter(item => item !== page);
+      await removeDraft(page.path).catch(() => {});
     }
 
     async freshFile(page) {

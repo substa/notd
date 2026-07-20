@@ -472,10 +472,32 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self.require_api_access(parsed, write=True):
             return
-        if parsed.path != "/api/graph/asset":
-            return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         if not self.graph:
             return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
+        if parsed.path == "/api/graph/file":
+            try:
+                payload = self.request_json()
+                target = self.graph_path(str(payload.get("path", "")), markdown_only=True)
+                with self.server.mutation_lock:  # type: ignore[attr-defined]
+                    if not target.is_file():
+                        raise FileNotFoundError(target.name)
+                    expected = payload.get("expectedRevision")
+                    if expected is not None and target.stat().st_mtime_ns != int(expected):
+                        return self.error_json(HTTPStatus.CONFLICT, "The file changed on disk")
+                    relative = target.relative_to(self.graph).as_posix()
+                    if self.watcher:
+                        with self.watcher.lock:
+                            target.unlink(); self.watcher.snapshot.pop(relative, None)
+                    else:
+                        target.unlink()
+                self.broker.publish({"type": "deleted", "path": relative, "clientId": payload.get("clientId")})
+                return self.json_response({"path": relative})
+            except FileNotFoundError:
+                return self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
+            except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
+                return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
+        if parsed.path != "/api/graph/asset":
+            return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         try:
             raw_path = parse_qs(parsed.query).get("path", [""])[0]
             if not raw_path.startswith("assets/"):
@@ -501,25 +523,47 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         try:
             payload = self.request_json()
-            source = self.graph_path(str(payload.get("source", "")), markdown_only=True)
-            target = self.graph_path(str(payload.get("target", "")), markdown_only=True)
+            source_path = str(payload.get("source", "")); target_path = str(payload.get("target", ""))
+            source = self.graph_path(source_path, markdown_only=True)
+            target = self.graph_path(target_path, markdown_only=True)
+            path_changed = PurePosixPath(unquote(source_path)).parts != PurePosixPath(unquote(target_path)).parts
             with self.server.mutation_lock:  # type: ignore[attr-defined]
-                if target.exists() and target != source:
+                same_entry = target.exists() and source.exists() and os.path.samefile(source, target)
+                if target.exists() and path_changed and not same_entry:
                     return self.error_json(HTTPStatus.CONFLICT, "A page with this name already exists")
                 expected = payload.get("expectedRevision")
                 if expected is not None and source.stat().st_mtime_ns != int(expected):
                     return self.error_json(HTTPStatus.CONFLICT, "The file changed on disk")
-                source_relative = source.relative_to(self.graph).as_posix(); target_relative = target.relative_to(self.graph).as_posix()
+                source_relative = source.relative_to(self.graph).as_posix()
+                target_relative = PurePosixPath(unquote(target_path)).as_posix()
+
+                def rename_file() -> int:
+                    if same_entry and path_changed:
+                        # A case-insensitive filesystem sees names such as test.md and
+                        # Test.md as the same entry. Rename through a temporary path so
+                        # the requested casing is retained without deleting the page.
+                        temporary = source.with_name(f".{source.name}.case-rename-{time.time_ns()}")
+                        source.replace(temporary)
+                        try:
+                            result = self.atomic_write(target, str(payload.get("content", "")))
+                        except Exception:
+                            temporary.replace(source)
+                            raise
+                        temporary.unlink()
+                        return result
+                    result = self.atomic_write(target, str(payload.get("content", "")))
+                    if path_changed:
+                        source.unlink()
+                    return result
+
                 if self.watcher:
                     with self.watcher.lock:
-                        revision = self.atomic_write(target, str(payload.get("content", "")))
-                        if source != target:
-                            source.unlink(); self.watcher.snapshot.pop(source_relative, None)
+                        revision = rename_file()
+                        if path_changed:
+                            self.watcher.snapshot.pop(source_relative, None)
                         self.watcher.snapshot[target_relative] = str(revision)
                 else:
-                    revision = self.atomic_write(target, str(payload.get("content", "")))
-                    if source != target:
-                        source.unlink()
+                    revision = rename_file()
             self.broker.publish({"type": "renamed", "path": target_relative, "oldPath": source_relative, "revision": str(revision), "clientId": payload.get("clientId")})
             self.json_response({"path": target_relative, "revision": str(revision)})
         except FileNotFoundError:

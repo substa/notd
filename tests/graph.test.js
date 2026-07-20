@@ -163,3 +163,11 @@ test('updates page references without changing aliases', () => {
     '- [[New page]] and [[New page|label]] and [[Other]]'
   );
 });
+
+test('updates page-reference casing during a case-only rename', () => {
+  const content = '- [[test]] and [[TEST|label]] and [[Other]]';
+  assert.equal(
+    Graph.replacePageReferences(content, 'test', 'Test'),
+    '- [[Test]] and [[Test|label]] and [[Other]]'
+  );
+});

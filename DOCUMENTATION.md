@@ -80,7 +80,7 @@ Enter a title. If the page does not exist, choose **Create page** and press `Ent
 
 ### Rename a page
 
-Use **Rename document** or `F2`. markd can update matching `[[...]]` references throughout the graph. Journal pages cannot be renamed, preserving Logseq compatibility.
+Use **Rename document** or `F2`, edit the title, then select the minimal checkmark icon to save. The adjacent trash icon deletes the current page after confirmation. markd can update matching `[[...]]` references throughout the graph. Case-only changes such as `test` to `Test` are supported, including on case-insensitive filesystems. Journal pages cannot be renamed or deleted, preserving Logseq compatibility.
 
 ## Blocks and outliner
 
@@ -94,11 +94,14 @@ Each bullet is a block. Nested blocks are stored through Markdown indentation.
 | Outdent | `Shift + Tab` |
 | Move up or down | `Alt + ↑/↓` |
 | Delete an empty block | `Backspace` |
+| Select multiple blocks | `⌘/Ctrl + click`; use `Shift + click` for a range |
+| Delete selected blocks | `Backspace` |
+| Clear the block selection | `Escape` |
 | Cycle the task state | `⌘/Ctrl + Enter` |
 | Collapse or expand children | Arrow beside the bullet |
 | Zoom into a block | Click the bullet |
 
-Editing does not add a border or background to the selected block.
+Editing does not add a border or background to the active block. To select blocks for a bulk action, use `⌘/Ctrl + click`; `Shift + click` extends the selection across the visible range. Selected blocks are highlighted and can be deleted together with `Backspace`. Deleting a parent block also deletes its nested blocks.
 
 ## Tasks
 
@@ -296,12 +299,12 @@ To wrap selected text directly from the keyboard, type the opening character twi
 Available themes:
 
 - Light;
-- Sepia;
-- Dark.
+- Dark;
+- System, which switches automatically when the operating-system preference changes.
 
 The selected theme persists in the browser.
 
-Fonts and the main colors for all three themes can be customized in `theme-config.css`. This file is loaded after the application stylesheet, so its CSS variables override the defaults without requiring changes to `styles.css`.
+Fonts and the main colors for the light and dark themes can be customized in `theme-config.css`. This file is loaded after the application stylesheet, so its CSS variables override the defaults without requiring changes to `styles.css`.
 
 ## Privacy and security
 

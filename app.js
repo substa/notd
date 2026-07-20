@@ -17,6 +17,7 @@
   const documentationContent = $('#documentationContent');
   const journalCalendar = $('#journalCalendar');
   const fileName = $('#fileName');
+  const documentTitleActions = $('#documentTitleActions');
   const fileInput = $('#fileInput');
   const assetInput = $('#assetInput');
   const saveState = $('#saveState');
@@ -39,12 +40,16 @@
   let remoteRefreshTimer = null;
   let remoteRefreshPending = false;
   let activeGraphBlock = null;
+  let selectedGraphBlockIds = new Set();
+  let graphSelectionAnchor = null;
+  let graphSelectionPagePath = null;
   let graphDraftTimer = null;
   let activeSourceBlock = null;
   let paletteContext = null;
   let filteredCommands = [];
   let expandedCommandSections = new Set();
   let selectedCommand = 0;
+  let titleEditOriginal = '';
   let calendarViewDate = new Date();
   let calendarFocusDate = new Date();
   let calendarSelectAction = null;
@@ -640,11 +645,15 @@ Open, save, export, and reach recent documents or headings from the command pale
     return [...new Map(groups.flat().map(task => [`${task.page.path}:${task.block.id}`, task])).values()];
   }
 
-  function taskSummary() {
-    const groups = taskGroups();
+  function taskOverviewGroups(groups = taskGroups()) {
     const progressIds = new Set(groups.progress.map(task => `${task.page.path}:${task.block.id}`));
     const today = uniqueTasks(groups.overdue, groups.today).filter(task => !progressIds.has(`${task.page.path}:${task.block.id}`));
-    return { today: today.length, progress: groups.progress.length, week: uniqueTasks(groups.today, groups.thisWeek).length };
+    return { today, progress: groups.progress };
+  }
+
+  function taskSummary() {
+    const groups = taskGroups(); const overview = taskOverviewGroups(groups);
+    return { today: overview.today.length, week: uniqueTasks(groups.today, groups.thisWeek).length };
   }
 
   function taskRowsHtml(items) {
@@ -702,12 +711,10 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function journalTaskPanelElement() {
-    const groups = taskGroups(); const panel = document.createElement('section'); panel.className = 'journal-task-panel';
-    const tomorrowDate = taskDate(1);
+    const overview = taskOverviewGroups(); const panel = document.createElement('section'); panel.className = 'journal-task-panel';
     const sections = [
-      ['Today', uniqueTasks(groups.overdue, groups.today, groups.progress)],
-      ['Tomorrow', groups.next.filter(task => task.scheduled === tomorrowDate)],
-      ['Next days', groups.next.filter(task => task.scheduled > tomorrowDate)]
+      ['Today', overview.today],
+      ['In progress', overview.progress]
     ];
     panel.innerHTML = `${sections.map(([label, tasks]) => `<details class="task-dashboard-group" open><summary><span>${label}</span><span class="task-section-count">${tasks.length}</span></summary>${taskRowsHtml(tasks)}</details>`).join('')}<button type="button" class="journal-all-tasks" data-task-filter="all">All tasks</button>`;
     return panel;
@@ -750,7 +757,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       const fragment = document.createDocumentFragment();
       for (const block of blocks) {
         const node = document.createElement('div');
-        node.className = `block-node${block.children.length ? ' has-children' : ''}${block.collapsed ? ' collapsed' : ''}`;
+        const selected = graphSelectionPagePath === (page?.path || '') && selectedGraphBlockIds.has(block.id);
+        node.className = `block-node${block.children.length ? ' has-children' : ''}${block.collapsed ? ' collapsed' : ''}${selected ? ' block-selected' : ''}`;
         node.dataset.blockId = block.id; node.dataset.pagePath = page?.path || '';
         const row = document.createElement('div'); row.className = 'block-row';
         let toggle;
@@ -796,7 +804,7 @@ Open, save, export, and reach recent documents or headings from the command pale
           const expanded = state.taskView === 'summary';
           button.setAttribute('aria-expanded', String(expanded));
           const arrow = document.createElement('span'); arrow.className = 'journal-task-summary-arrow'; arrow.setAttribute('aria-hidden', 'true');
-          const label = document.createElement('span'); label.textContent = `${summary.today} ${summary.today === 1 ? 'task' : 'tasks'} today, ${summary.progress} in progress, ${summary.week} this week`;
+          const label = document.createElement('span'); label.textContent = `${summary.today} ${summary.today === 1 ? 'task' : 'tasks'} today, ${summary.week} this week`;
           button.append(arrow, label); section.append(button);
           if (state.taskView === 'summary') section.append(journalTaskPanelElement());
         }
@@ -830,6 +838,58 @@ Open, save, export, and reach recent documents or headings from the command pale
     field.style.height = '0'; field.style.height = `${Math.max(32, field.scrollHeight)}px`;
   }
 
+  function clearGraphBlockSelection() {
+    selectedGraphBlockIds.clear(); graphSelectionAnchor = null; graphSelectionPagePath = null;
+    $$('.block-node.block-selected', blockTree).forEach(node => node.classList.remove('block-selected'));
+  }
+
+  function graphSelectionNodes(pagePath = state.graphPage?.path) {
+    return $$('.block-node', blockTree).filter(node => node.dataset.pagePath === pagePath && node.getClientRects().length);
+  }
+
+  function selectGraphBlocksWithMouse(node, event) {
+    const pagePath = node?.dataset.pagePath;
+    if (!node || !pagePath || pagePath !== state.graphPage?.path) return false;
+    commitGraphBlock();
+    const nodes = graphSelectionNodes(pagePath); const id = node.dataset.blockId;
+    if (event.shiftKey && graphSelectionAnchor && graphSelectionPagePath === pagePath) {
+      const anchorIndex = nodes.findIndex(item => item.dataset.blockId === graphSelectionAnchor);
+      const targetIndex = nodes.indexOf(node);
+      if (!event.metaKey && !event.ctrlKey) selectedGraphBlockIds.clear();
+      if (anchorIndex >= 0 && targetIndex >= 0) {
+        const [start, end] = [anchorIndex, targetIndex].sort((a, b) => a - b);
+        nodes.slice(start, end + 1).forEach(item => selectedGraphBlockIds.add(item.dataset.blockId));
+      } else selectedGraphBlockIds.add(id);
+    } else if (event.metaKey || event.ctrlKey) {
+      if (selectedGraphBlockIds.has(id)) selectedGraphBlockIds.delete(id); else selectedGraphBlockIds.add(id);
+      graphSelectionAnchor = id;
+    } else {
+      selectedGraphBlockIds.clear(); selectedGraphBlockIds.add(id); graphSelectionAnchor = id;
+    }
+    graphSelectionPagePath = selectedGraphBlockIds.size ? pagePath : null;
+    if (!selectedGraphBlockIds.size) graphSelectionAnchor = null;
+    nodes.forEach(item => item.classList.toggle('block-selected', selectedGraphBlockIds.has(item.dataset.blockId)));
+    outliner.focus({ preventScroll: true });
+    return true;
+  }
+
+  function deleteSelectedGraphBlocks() {
+    if (!selectedGraphBlockIds.size || graphSelectionPagePath !== state.graphPage?.path) return false;
+    commitGraphBlock();
+    const snapshot = captureVimSnapshot(); const selected = new Set(selectedGraphBlockIds); const count = selected.size;
+    const remove = blocks => blocks.filter(block => {
+      if (selected.has(block.id)) return false;
+      block.children = remove(block.children || []); return true;
+    });
+    state.graphDocument.blocks = remove(state.graphDocument.blocks);
+    if (!state.graphDocument.blocks.length) state.graphDocument.blocks.push({ id: MarkdGraph.newId(), uuid: null, content: '', marker: '-', children: [], collapsed: false });
+    if (state.graphZoomId && !graphBlockLocation(state.graphZoomId)) state.graphZoomId = null;
+    clearGraphBlockSelection(); pushVimSnapshot(vimUndoStack, snapshot); vimRedoStack.length = 0;
+    graphChanged(); renderGraphPage(); outliner.focus({ preventScroll: true });
+    toast(`Deleted ${count} block${count === 1 ? '' : 's'}`);
+    return true;
+  }
+
   function commitGraphBlock() {
     if (!activeGraphBlock) return;
     const { block, field, page } = activeGraphBlock;
@@ -842,6 +902,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function activateGraphBlock(block, position = null, page = state.graphPage) {
     if (!block || state.sourceMode) return;
+    clearGraphBlockSelection();
     if (activeGraphBlock?.block === block) return activeGraphBlock.field.focus();
     commitGraphBlock();
     const content = $$('.graph-block-content', blockTree).find(element => element.dataset.blockId === block.id && element.dataset.pagePath === (page?.path || ''));
@@ -1066,12 +1127,12 @@ Open, save, export, and reach recent documents or headings from the command pale
     state.taskView = page.name.toLowerCase() === 'tasks.md' ? 'all' : null;
     if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
-    activeSourceBlock = null; activeGraphBlock = null;
+    activeSourceBlock = null; activeGraphBlock = null; clearGraphBlockSelection();
     vimUndoStack.length = 0; vimRedoStack.length = 0; vimInsertSnapshot = null; state.vimMode = 'normal';
     editor.hidden = true; sourceEditor.hidden = true; outliner.hidden = false;
     app.classList.add('graph-mode'); app.classList.toggle('journal-mode', state.journalMode); app.classList.toggle('dirty', Boolean(draft));
     updateVimUi();
-    fileName.value = page.title; fileName.readOnly = Boolean(page.journal); document.title = `${page.title} — ${graphStore.name} — markd`;
+    finishTitleEdit(); fileName.value = page.title; fileName.readOnly = Boolean(page.journal); document.title = `${page.title} — ${graphStore.name} — markd`;
     rememberGraphPage(page);
     syncGraphRoute(page, options);
     renderGraphPage(); updateStats();
@@ -1205,10 +1266,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     }).join('');
     const calendarTasks = $('#calendarTasks'); calendarTasks.hidden = Boolean(calendarSelectAction);
     if (calendarSelectAction) { calendarTasks.innerHTML = ''; return; }
-    const groups = taskGroups(); const tomorrowDate = taskDate(1);
-    const tomorrow = groups.next.filter(task => task.scheduled === tomorrowDate);
-    const todayTasks = uniqueTasks(groups.overdue, groups.today, groups.progress);
-    calendarTasks.innerHTML = `<section><h3>Today <span>${todayTasks.length}</span></h3>${calendarTaskRowsHtml(todayTasks)}</section><section><h3>Tomorrow <span>${tomorrow.length}</span></h3>${calendarTaskRowsHtml(tomorrow)}</section><button type="button" class="calendar-all-tasks" data-calendar-all-tasks>All tasks <span aria-hidden="true">→</span></button>`;
+    const overview = taskOverviewGroups();
+    calendarTasks.innerHTML = `<section><h3>Today <span>${overview.today.length}</span></h3>${calendarTaskRowsHtml(overview.today)}</section><section><h3>In progress <span>${overview.progress.length}</span></h3>${calendarTaskRowsHtml(overview.progress)}</section><button type="button" class="calendar-all-tasks" data-calendar-all-tasks>All tasks <span aria-hidden="true">→</span></button>`;
   }
 
   function focusCalendarDate(date) {
@@ -2115,6 +2174,11 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function handleVimKeydown(event) {
     if (!state.vimEnabled || !$('#commandPalette').hidden || !$('#confirmDialog').hidden) return;
+    if (selectedGraphBlockIds.size && (event.target === outliner || outliner.contains(event.target)) && ['Backspace', 'Escape'].includes(event.key)) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (event.key === 'Backspace') deleteSelectedGraphBlocks(); else clearGraphBlockSelection();
+      return;
+    }
     const field = event.target === sourceEditor ? sourceEditor : (event.target === activeGraphBlock?.field ? activeGraphBlock.field : (event.target === activeSourceBlock ? activeSourceBlock : null));
     const ctrlEscape = event.ctrlKey && event.key === '[';
     const ctrlCommand = event.ctrlKey && !event.metaKey && !event.altKey && ['d', 'u', 'r'].includes(event.key.toLowerCase());
@@ -2228,7 +2292,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     state.dirty = false;
     editor.innerHTML = markdownToHtml(markdown);
     sourceEditor.value = markdown;
-    fileName.value = name.replace(/\.(md|markdown|txt)$/i, ''); fileName.readOnly = false;
+    finishTitleEdit(); fileName.value = name.replace(/\.(md|markdown|txt)$/i, ''); fileName.readOnly = false;
     document.title = `${fileName.value} — markd`;
     app.classList.remove('dirty');
     updateStats(); updateOutline(); persistLocal(false);
@@ -2676,8 +2740,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     { label: 'Table', keywords: 'table rows columns', run: () => transformMarkdownBlock(() => '| Column 1 | Column 2 |\n| --- | --- |\n| Cell | Cell |') },
     { label: 'Divider', keywords: 'separator line hr', run: () => transformMarkdownBlock(() => '---') },
     { label: 'Light theme', keywords: 'appearance light', run: () => setTheme('light') },
-    { label: 'Sepia theme', keywords: 'appearance sepia', run: () => setTheme('sepia') },
-    { label: 'Dark theme', keywords: 'appearance dark', run: () => setTheme('dark') }
+    { label: 'Dark theme', keywords: 'appearance dark', run: () => setTheme('dark') },
+    { label: 'System theme', keywords: 'appearance system automatic', run: () => setTheme('system') }
   ];
 
   function goToHeading(index, line) {
@@ -2857,15 +2921,27 @@ Open, save, export, and reach recent documents or headings from the command pale
     markdWrap.scrollTop = 0;
   }
 
+  function beginTitleEdit() {
+    if (!state.graphMode || !state.graphPage || state.graphPage.journal || state.graphPage.virtual) { documentTitleActions.hidden = true; return; }
+    titleEditOriginal = state.graphPage.title; documentTitleActions.hidden = false; app.classList.add('title-editing');
+  }
+
+  function finishTitleEdit(cancel = false) {
+    if (cancel && state.graphMode && state.graphPage) fileName.value = titleEditOriginal || state.graphPage.title;
+    documentTitleActions.hidden = true; app.classList.remove('title-editing'); titleEditOriginal = '';
+  }
+
   async function renameGraphPage(title) {
     const page = state.graphPage; const nextTitle = title.trim();
-    if (page?.journal) { fileName.value = page.title; return; }
-    if (!page || !nextTitle || nextTitle === page.title) { if (page) fileName.value = page.title; return; }
+    if (page?.journal) { fileName.value = page.title; return false; }
+    if (!page || !nextTitle) { if (page) fileName.value = page.title; return false; }
+    if (nextTitle === page.title) { fileName.value = page.title; return true; }
     try {
       commitGraphBlock();
       if (!(await flushGraphSave(true))) throw new Error('Save the current page before renaming it');
       const oldTitle = page.title;
-      const duplicate = graphStore.findPage(nextTitle); if (duplicate && duplicate !== page) throw new Error('A page with this name already exists');
+      const duplicate = graphStore.pages.find(candidate => candidate !== page && MarkdGraph.normalizePage(candidate.title) === MarkdGraph.normalizePage(nextTitle));
+      if (duplicate) throw new Error('A page with this name already exists');
       const updateLinks = confirm(`Rename “${oldTitle}” to “${nextTitle}” and update page references?`);
       let currentContent = page.content.replace(/^(\s*title::\s*).+$/mi, `$1${nextTitle}`);
       if (updateLinks) {
@@ -2883,8 +2959,20 @@ Open, save, export, and reach recent documents or headings from the command pale
       graphIndex = new MarkdGraph.GraphIndex(graphStore.pages); fileName.value = nextTitle;
       document.title = `${nextTitle} — ${graphStore.name} — markd`; saveSettings({ lastGraphPage: nextTitle });
       syncGraphRoute(renamed, { journalMode: state.journalMode, replaceRoute: true });
-      renderGraphPage(); saveState.textContent = 'Saved'; toast('Page renamed');
-    } catch (error) { fileName.value = page.title; toast(error.message || 'Could not rename the page'); }
+      renderGraphPage(); saveState.textContent = 'Saved'; toast('Page renamed'); return true;
+    } catch (error) { fileName.value = page.title; toast(error.message || 'Could not rename the page'); return false; }
+  }
+
+  async function deleteCurrentGraphPage() {
+    const page = state.graphPage;
+    if (!state.graphMode || !page || page.journal || page.virtual) return;
+    if (!confirm(`Delete “${page.title}”? This cannot be undone.`)) return;
+    try {
+      commitGraphBlock(); clearTimeout(state.saveTimer); clearTimeout(graphDraftTimer);
+      await graphStore.deletePage(page); graphIndex.removePage(page); journalDocuments.delete(page.path);
+      state.dirty = false; state.graphConflict = false; app.classList.remove('dirty'); finishTitleEdit();
+      await openToday(true, { replaceRoute: true }); toast(`Deleted “${page.title}”`);
+    } catch (error) { toast(error.message || 'Could not delete the page'); }
   }
 
   // UI events
@@ -3027,11 +3115,26 @@ Open, save, export, and reach recent documents or headings from the command pale
       toast(`Uploaded ${file.name}`);
     } catch (error) { toast(error.message || 'Could not upload the file'); }
   });
+  fileName.addEventListener('focus', beginTitleEdit);
   fileName.addEventListener('input', () => { if (!state.graphMode) changed(); });
-  fileName.addEventListener('blur', () => {
-    if (!fileName.value.trim()) fileName.value = state.graphMode ? state.graphPage.title : 'Untitled';
-    if (state.graphMode) renameGraphPage(fileName.value); else persistLocal(false);
+  fileName.addEventListener('keydown', event => {
+    if (!state.graphMode || documentTitleActions.hidden) return;
+    if (event.key === 'Enter') { event.preventDefault(); $('#saveTitleButton').click(); }
+    else if (event.key === 'Escape') { event.preventDefault(); finishTitleEdit(true); fileName.blur(); }
   });
+  fileName.addEventListener('blur', event => {
+    if (!fileName.value.trim()) fileName.value = state.graphMode ? state.graphPage.title : 'Untitled';
+    if (!state.graphMode) { persistLocal(false); return; }
+    if (documentTitleActions.contains(event.relatedTarget)) return;
+    finishTitleEdit(true);
+  });
+  documentTitleActions.addEventListener('focusout', () => setTimeout(() => {
+    if (!documentTitleActions.hidden && !$('.document-title').contains(document.activeElement)) finishTitleEdit(true);
+  }));
+  $('#saveTitleButton').addEventListener('click', async () => {
+    if (await renameGraphPage(fileName.value)) { finishTitleEdit(); outliner.focus({ preventScroll: true }); }
+  });
+  $('#deletePageButton').addEventListener('click', deleteCurrentGraphPage);
   editor.addEventListener('input', event => {
     if (!event.target.matches?.('.md-source-block') && event.inputType?.startsWith('insert')) transformInlineMarkdown();
     changed();
@@ -3061,7 +3164,21 @@ Open, save, export, and reach recent documents or headings from the command pale
   editor.addEventListener('click', event => {
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
   });
+  outliner.addEventListener('pointerdown', event => {
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey) return;
+    const node = event.target.closest('.block-node');
+    if (node?.dataset.pagePath === state.graphPage?.path && event.target.closest('.block-row')) event.preventDefault();
+  });
+  outliner.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && selectedGraphBlockIds.size) { event.preventDefault(); clearGraphBlockSelection(); return; }
+    if (event.key === 'Backspace' && selectedGraphBlockIds.size) { event.preventDefault(); deleteSelectedGraphBlocks(); }
+  });
   outliner.addEventListener('click', async event => {
+    const selectionNode = event.target.closest('.block-node');
+    if (selectionNode && event.target.closest('.block-row') && (event.metaKey || event.ctrlKey || event.shiftKey) && selectGraphBlocksWithMouse(selectionNode, event)) {
+      event.preventDefault(); return;
+    }
+    if (selectedGraphBlockIds.size && !event.metaKey && !event.ctrlKey && !event.shiftKey) clearGraphBlockSelection();
     const scheduledDate = event.target.closest('[data-scheduled-block]');
     if (scheduledDate) {
       event.preventDefault(); event.stopPropagation();
@@ -3162,12 +3279,21 @@ Open, save, export, and reach recent documents or headings from the command pale
     const item = event.target.closest('[data-autocomplete-index]'); if (item) chooseGraphAutocomplete(Number(item.dataset.autocompleteIndex));
   });
 
-  function setTheme(theme) {
-    app.classList.remove('theme-sepia', 'theme-dark'); if (theme !== 'light') app.classList.add(`theme-${theme}`);
-    const themeColors = { light: '#fdfcfb', sepia: '#f5efe3', dark: '#282725' };
-    $('meta[name="theme-color"]')?.setAttribute('content', themeColors[theme] || themeColors.light);
-    saveSettings({ theme });
+  const systemColorScheme = matchMedia('(prefers-color-scheme: dark)');
+  let selectedTheme = 'system';
+  function applyTheme() {
+    const effectiveTheme = selectedTheme === 'system' ? (systemColorScheme.matches ? 'dark' : 'light') : selectedTheme;
+    app.classList.toggle('theme-dark', effectiveTheme === 'dark');
+    app.classList.toggle('theme-system', selectedTheme === 'system');
+    $('meta[name="theme-color"]')?.setAttribute('content', effectiveTheme === 'dark' ? '#282725' : '#fdfcfb');
   }
+  function setTheme(theme, persist = true) {
+    selectedTheme = ['light', 'dark', 'system'].includes(theme) ? theme : 'system';
+    applyTheme();
+    if (persist) saveSettings({ theme: selectedTheme });
+  }
+  if (systemColorScheme.addEventListener) systemColorScheme.addEventListener('change', () => { if (selectedTheme === 'system') applyTheme(); });
+  else systemColorScheme.addListener(() => { if (selectedTheme === 'system') applyTheme(); });
   function saveSettings(change) {
     let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, ...change }));
@@ -3288,7 +3414,9 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   // Initial state
   let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
-  setTheme(settings.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  const savedTheme = ['light', 'dark', 'system'].includes(settings.theme) ? settings.theme : 'system';
+  setTheme(savedTheme, false);
+  if (settings.theme !== savedTheme) saveSettings({ theme: savedTheme });
   setVimEnabled(Boolean(settings.vimEnabled), false);
   let docs = getStoredDocs();
   if (settings.welcomeVersion !== WELCOME_VERSION) {

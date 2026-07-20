@@ -7,6 +7,8 @@
  */
 
 :root {
+  color-scheme: light;
+
   /* Typography */
   --ui: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --body: Iowan, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
@@ -35,30 +37,9 @@
   --markd-width: 760px;
 }
 
-/* Sepia — un tono più caldo, senza perdere contrasto. */
-.theme-sepia {
-  --bg: #f5efe3;
-  --chrome: #f1eadc;
-  --text: #4c463d;
-  --muted: #847b6d;
-  --faint: #d4cbbb;
-  --border: #dfd5c4;
-  --accent: #587da0;
-  --selection: #c9d9e5;
-  --code: #eae1d2;
-  --quote: #756c60;
-  --code-block-bg: #eee8dd;
-  --syntax-comment: #8c8477;
-  --syntax-keyword: #7e4c91;
-  --syntax-string: #507448;
-  --syntax-number: #b2673b;
-  --syntax-operator: #466b8d;
-  --syntax-builtin: #3f7773;
-  --syntax-tag: #a44b55;
-}
-
 /* Dark — charcoal instead of pure black. */
 .theme-dark {
+  color-scheme: dark;
   --bg: #282725;
   --chrome: #242321;
   --text: #d8d3cb;
@@ -107,9 +88,6 @@ body {
 
 .document-title input:hover,
 .document-title input:focus,
-.theme-sepia .document-title input,
-.theme-sepia .document-title input:hover,
-.theme-sepia .document-title input:focus,
 .theme-dark .document-title input,
 .theme-dark .document-title input:hover,
 .theme-dark .document-title input:focus {
@@ -295,10 +273,8 @@ body {
   font: 700 34px/1.18 var(--heading);
   letter-spacing: -.015em;
 }
-.theme-sepia .journal-heading,
 .theme-dark .journal-heading { color: var(--text); }
 .journal-heading:hover,
-.theme-sepia .journal-heading:hover,
 .theme-dark .journal-heading:hover { color: var(--accent); }
 .journal-task-summary,
 .on-this-day-toggle {

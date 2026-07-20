@@ -17,6 +17,14 @@
     <header class="titlebar">
       <div class="document-title">
         <input id="fileName" value="Untitled" aria-label="Document name" spellcheck="false">
+        <div id="documentTitleActions" class="document-title-actions" hidden>
+          <button id="saveTitleButton" type="button" aria-label="Save page title" title="Save title">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>
+          </button>
+          <button id="deletePageButton" type="button" aria-label="Delete page" title="Delete page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+          </button>
+        </div>
         <span id="dirtyDot" class="dirty-dot" aria-label="Unsaved changes"></span>
       </div>
       <div class="title-actions">
@@ -48,7 +56,7 @@
 
       <div class="markd-wrap" id="markdWrap">
         <article id="editor" class="editor" contenteditable="true" spellcheck="true" aria-label="Editor Markdown"></article>
-        <article id="outliner" class="outliner" aria-label="Graph outliner" hidden>
+        <article id="outliner" class="outliner" tabindex="-1" aria-label="Graph outliner" hidden>
           <nav id="zoomBreadcrumb" class="zoom-breadcrumb" aria-label="Block breadcrumb" hidden></nav>
           <div id="pagePreamble" class="page-preamble" hidden></div>
           <div id="blockTree" class="block-tree"></div>

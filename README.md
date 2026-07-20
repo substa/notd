@@ -50,7 +50,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - direct saving on Chromium and `.md` downloads on other browsers;
 - local copies and recent documents;
 - automatic outline, search, and word count;
-- light, sepia, and dark themes;
+- light, dark, and system themes, with automatic system appearance updates;
 - HTML export;
 - desktop/mobile layouts and offline PWA support;
 - local graphs backed by `pages/`, `journals/`, and Markdown files;
@@ -72,7 +72,7 @@ In direct local mode, no content is sent to a server. Automatic document copies 
 
 ## Local graph support
 
-Use **Open local graph** from the command palette and select a folder. markd reads Markdown files at the graph root and under `pages/` and `journals/`. The graph index is rebuilt locally and supports Logseq-style page and block references. In the outliner, use `Enter` to add a sibling, `Shift+Enter` for a line break, `Tab`/`Shift+Tab` to change depth, `Alt+↑/↓` to reorder, and `⌘/Ctrl+Enter` to cycle task states. Click a bullet to zoom into it; use the small arrow to collapse or expand nested blocks.
+Use **Open local graph** from the command palette and select a folder. markd reads Markdown files at the graph root and under `pages/` and `journals/`. The graph index is rebuilt locally and supports Logseq-style page and block references. In the outliner, use `Enter` to add a sibling, `Shift+Enter` for a line break, `Tab`/`Shift+Tab` to change depth, `Alt+↑/↓` to reorder, and `⌘/Ctrl+Enter` to cycle task states. Use `⌘/Ctrl+click` to select multiple blocks or `Shift+click` to select a visible range, then press `Backspace` to delete them. Click a bullet to zoom into it; use the small arrow to collapse or expand nested blocks.
 
 Opening a graph starts on today's Logseq-compatible journal. Existing journals are shown below it in reverse chronological order and loaded progressively while scrolling. In a block, type `/` to show inline commands: `/today`, `/yesterday`, and `/tomorrow` insert journal references, `/date picker` inserts a selected `[[page reference]]`, and `/upload` saves an attachment in `assets/` and inserts its Markdown link. Use **Sync all notes and backlinks** to force a full index rebuild after external changes. **Clean orphaned assets** lists unreferenced attachments and asks for confirmation before deleting them. Use `⌘/Ctrl+Shift+J` for today's journal and `Alt+←/→` to move backward or forward through page history. The journal filename and displayed date follow `:journal/file-name-format` and `:journal/page-title-format` from `logseq/config.edn` (default filename: `yyyy_MM_dd.md`).
 
