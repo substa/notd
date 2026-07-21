@@ -8,7 +8,7 @@ const context = { crypto: webcrypto };
 context.window = context;
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(new URL('../graph.js', `file://${__filename}`), 'utf8'), context);
-const Graph = context.MarkdGraph;
+const Graph = context.NotdGraph;
 
 test('parses and serializes nested Logseq blocks', () => {
   const markdown = 'title:: Project\n\n- parent [[Other]]\n  id:: abcdefgh-1234\n  - child\n- TODO next\n';
@@ -102,6 +102,21 @@ test('keeps every scanned page in the index when titles or aliases overlap', () 
 
   assert.equal(index.allPages().length, 2);
   assert.equal(index.search('second unique').length, 1);
+});
+
+test('ignores accidentally nested Logseq graph copies', () => {
+  const index = new Graph.GraphIndex([
+    { title: 'Source', path: 'pages/source.md', content: '- [[Target]]\n' },
+    { title: 'Source', path: 'pages/pages/source.md', content: '- [[Target]]\n' },
+    { title: 'Target', path: 'pages/target.md', content: '- Original\n' },
+    { title: 'Target', path: 'pages/pages/target.md', content: '- Duplicate\n' },
+    { title: 'Jul 21st, 2026', path: 'journals/2026_07_21.md', content: '- Journal\n', journal: true },
+    { title: 'Jul 21st, 2026', path: 'journals/journals/2026_07_21.md', content: '- Duplicate journal\n', journal: true }
+  ]);
+
+  assert.equal(index.allPages().length, 3);
+  assert.equal(index.referencesToPage('Target').length, 1);
+  assert.equal(index.pageSuggestions().filter(page => page.title === 'Target').length, 1);
 });
 
 test('indexes namespaced page links and tags', () => {

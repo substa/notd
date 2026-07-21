@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#fdfcfb">
   <meta name="description" content="A minimal, fast, local Markdown editor.">
   <meta name="referrer" content="no-referrer">
-  <title>markd — Markdown editor</title>
+  <title>notd — Markdown editor</title>
   <base href="/">
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="apple-mobile-web-app-title" content="markd">
+  <meta name="apple-mobile-web-app-title" content="notd">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="theme-config.css">
 </head>
@@ -59,7 +59,7 @@
         <button id="findClose" aria-label="Close">×</button>
       </div>
 
-      <div class="markd-wrap" id="markdWrap">
+      <div class="notd-wrap" id="notdWrap">
         <article id="editor" class="editor" contenteditable="true" spellcheck="true" aria-label="Editor Markdown"></article>
         <article id="outliner" class="outliner" tabindex="-1" aria-label="Graph outliner" hidden>
           <nav id="zoomBreadcrumb" class="zoom-breadcrumb" aria-label="Block breadcrumb" hidden></nav>
@@ -72,9 +72,10 @@
         <textarea id="sourceEditor" class="source-editor" spellcheck="false" aria-label="Markdown source" hidden></textarea>
       </div>
 
-      <footer class="statusbar"><span id="vimStatus" class="vim-status" hidden>-- NORMAL --</span><span id="saveState">Ready</span><span id="wordCount">0 words</span><button id="footerMenuButton" class="footer-menu-button" type="button" aria-label="Open page menu" aria-expanded="false" aria-controls="footerMenu" title="Page menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg></button><div id="footerMenu" class="footer-menu" role="menu" hidden><button type="button" role="menuitem" data-footer-action="new-page">New page</button><button type="button" role="menuitem" data-footer-action="delete-page">Delete page</button><hr><button type="button" role="menuitem" data-footer-action="settings">Settings</button><button type="button" role="menuitem" data-footer-action="shortcuts">Shortcuts</button><button type="button" role="menuitem" data-footer-action="documentation">Documentation</button></div></footer>
+      <footer class="statusbar"><span id="vimStatus" class="vim-status" hidden>-- NORMAL --</span><span id="saveState">Ready</span><span id="wordCount">0 words</span><button id="footerMenuButton" class="footer-menu-button" type="button" aria-label="Open page menu" aria-expanded="false" aria-controls="footerMenu" title="Page menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg></button></footer>
     </main>
 
+    <div id="footerMenu" class="footer-menu" role="menu" hidden><button type="button" role="menuitem" data-footer-action="new-page">New page</button><button type="button" role="menuitem" data-footer-action="delete-page">Delete page</button><hr><button type="button" role="menuitem" data-footer-action="settings">Settings</button><button type="button" role="menuitem" data-footer-action="shortcuts">Shortcuts</button><button type="button" role="menuitem" data-footer-action="documentation">Documentation</button></div>
 
     <div class="dialog-backdrop" id="confirmDialog" hidden>
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
@@ -132,7 +133,7 @@
     </div>
     <section id="settingsView" class="settings-view" aria-label="Settings" hidden>
       <header class="settings-header">
-        <strong>markd · Settings</strong>
+        <strong>notd · Settings</strong>
         <button id="settingsClose" type="button" aria-label="Close settings">×</button>
       </header>
       <div class="settings-layout">
@@ -153,6 +154,7 @@
             <div id="shortcutList"></div>
           </section>
           <section class="settings-panel settings-documentation" data-settings-panel="documentation" hidden>
+            <nav id="documentationMenu" class="documentation-menu" aria-label="Documentation sections"></nav>
             <article id="documentationContent" class="editor documentation-content"></article>
           </section>
         </main>

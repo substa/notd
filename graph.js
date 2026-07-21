@@ -1,10 +1,11 @@
 (() => {
   'use strict';
 
-  const DB_NAME = 'markd-graph-v1';
+  const DB_NAME = 'notd-graph-v1';
   const DB_VERSION = 2;
   const HANDLE_KEY = 'last-graph';
   const markdownFile = /\.(md|markdown)$/i;
+  const nestedGraphCopy = path => /^(pages|journals)\/\1\//i.test(String(path || '').replace(/\\/g, '/'));
 
   const normalizePage = value => {
     let normalized = String(value || '').trim().replace(/___/g, '/');
@@ -19,7 +20,7 @@
     for (const part of parts) { if (part === '.') continue; if (part === '..') normalized.pop(); else normalized.push(part); }
     return normalized.join('/');
   }
-  const newId = () => crypto.randomUUID?.() || `markd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const newId = () => crypto.randomUUID?.() || `notd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const hash = value => {
     let result = 2166136261;
     for (let i = 0; i < value.length; i++) result = Math.imul(result ^ value.charCodeAt(i), 16777619);
@@ -242,7 +243,7 @@
   }
 
   class ConflictError extends Error {
-    constructor(message = 'The file changed outside markd') { super(message); this.name = 'ConflictError'; }
+    constructor(message = 'The file changed outside notd') { super(message); this.name = 'ConflictError'; }
   }
 
   class GraphStore {
@@ -256,7 +257,7 @@
 
     static async open() {
       if (!window.showDirectoryPicker) throw new Error('Directory access is not supported by this browser');
-      const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'markd-graph' });
+      const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'notd-graph' });
       const store = new GraphStore(handle);
       if (!(await store.ensurePermission(true))) throw new Error('Graph permission was not granted');
       await setState(HANDLE_KEY, handle).catch(() => {});
@@ -284,7 +285,7 @@
 
     async readSettings() {
       try {
-        const directory = await this.handle.getDirectoryHandle('.markd');
+        const directory = await this.handle.getDirectoryHandle('.notd');
         const file = await (await directory.getFileHandle('settings.json')).getFile();
         const settings = JSON.parse(await file.text());
         if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('Graph settings must be a JSON object');
@@ -297,7 +298,7 @@
 
     async writeSettings(settings) {
       if (!(await this.ensurePermission(true))) throw new Error('Graph is read only');
-      const directory = await this.handle.getDirectoryHandle('.markd', { create: true });
+      const directory = await this.handle.getDirectoryHandle('.notd', { create: true });
       const handle = await directory.getFileHandle('settings.json', { create: true });
       const writable = await handle.createWritable();
       await writable.write(`${JSON.stringify(settings, null, 2)}\n`); await writable.close();
@@ -335,7 +336,7 @@
         for await (const [name, handle] of directory.entries()) {
           const path = folder ? `${folder}/${name}` : name;
           if (handle.kind === 'directory') {
-            if (folder || ['pages', 'journals'].includes(name)) await walk(handle, path);
+            if (!nestedGraphCopy(`${path}/`) && (folder || ['pages', 'journals'].includes(name))) await walk(handle, path);
             continue;
           }
           if (!markdownFile.test(name) || (folder && !/^(pages|journals)(\/|$)/.test(folder))) continue;
@@ -406,7 +407,7 @@
         // Case-insensitive filesystems return the original handle for a case-only
         // filename change. Move through a temporary file so removing the old name
         // does not also remove the newly written page.
-        const temporaryName = `.markd-case-rename-${newId()}.tmp`;
+        const temporaryName = `.notd-case-rename-${newId()}.tmp`;
         const temporaryHandle = await directory.getFileHandle(temporaryName, { create: true });
         const temporaryPage = { ...page, name: temporaryName, path: `${folder}/${temporaryName}`, handle: temporaryHandle, lastModified: 0 };
         await this.writePage(temporaryPage, content, { force: true });
@@ -658,7 +659,7 @@
       }
       if (!payload) throw new Error('No offline graph copy is available');
       if (!this.settingsConfig) this.config = { ...defaultJournalConfig, ...(payload.config || {}) };
-      this.pages = payload.files.map(file => this.pageFromFile(file)).sort((a, b) => a.title.localeCompare(b.title));
+      this.pages = payload.files.filter(file => !nestedGraphCopy(file.path)).map(file => this.pageFromFile(file)).sort((a, b) => a.title.localeCompare(b.title));
       return this.pages;
     }
 
@@ -755,7 +756,7 @@
     async writeAsset(file, preferredName = safeFilename(file.name)) {
       const name = safeFilename(preferredName);
       const response = await fetch(`${this.baseUrl}/asset?path=${encodeURIComponent(`assets/${name}`)}`, {
-        method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Markd-Client': this.clientId }, body: file
+        method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Notd-Client': this.clientId }, body: file
       });
       if (!response.ok) {
         let message = `Graph server error (${response.status})`; try { message = (await response.json()).error || message; } catch {}
@@ -774,7 +775,7 @@
     async removeAsset(reference) {
       const path = resolveAssetPath(reference);
       if (!path.startsWith('assets/')) throw new Error('Invalid asset path');
-      const response = await fetch(`${this.baseUrl}/asset?path=${encodeURIComponent(path)}`, { method: 'DELETE', headers: { 'X-Markd-Client': this.clientId } });
+      const response = await fetch(`${this.baseUrl}/asset?path=${encodeURIComponent(path)}`, { method: 'DELETE', headers: { 'X-Notd-Client': this.clientId } });
       if (!response.ok) {
         let message = `Graph server error (${response.status})`; try { message = (await response.json()).error || message; } catch {}
         throw new Error(message);
@@ -808,7 +809,7 @@
     }
 
     rebuild(pages = this.sourcePages) {
-      this.sourcePages = [...new Map(pages.map(page => [page.path, page])).values()];
+      this.sourcePages = [...new Map(pages.filter(page => !nestedGraphCopy(page.path)).map(page => [page.path, page])).values()];
       this.pages = new Map();
       this.documents = new Map();
       this.uuids = new Map();
@@ -943,7 +944,7 @@
     };
   }
 
-  window.MarkdGraph = {
+  window.NotdGraph = {
     GraphStore, RemoteGraphStore, GraphIndex, ConflictError, parseDocument, serializeDocument, flattenBlocks,
     propertiesFrom, pageReferences, blockReferences, pageTitle, normalizePage, resolveAssetPath, replacePageReferences, normalizePdfEmbeds,
     saveDraft, getDraft, removeDraft, journalInfo, formatJournalDate, parseJournalDate, newId

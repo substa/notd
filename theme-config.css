@@ -1,5 +1,5 @@
 /*
- * markd — editorial theme
+ * notd — editorial theme
  *
  * Ispirato alla tipografia quieta di manuelmoreale.com: caratteri old-style,
  * colori da carta e inchiostro, molto spazio bianco e controlli discreti.
@@ -13,7 +13,7 @@
   --ui: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --body: Iowan, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   --heading: Iowan, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
-  --mono: MarkdMono, "SFMono-Regular", Menlo, Consolas, monospace;
+  --mono: NotdMono, "SFMono-Regular", Menlo, Consolas, monospace;
 
   /* Light — paper and graphite */
   --bg: #fdfcfb;
@@ -34,7 +34,7 @@
   --syntax-operator: #1e66f5;
   --syntax-builtin: #179299;
   --syntax-tag: #d20f39;
-  --markd-width: 760px;
+  --notd-width: 760px;
 }
 
 /* Dark — charcoal instead of pure black. */
@@ -112,7 +112,7 @@ body {
 .editor,
 .source-editor,
 .outliner {
-  width: min(var(--markd-width), calc(100% - 64px));
+  width: min(var(--notd-width), calc(100% - 64px));
   padding-top: 68px;
   color: var(--text);
   font-family: var(--body);

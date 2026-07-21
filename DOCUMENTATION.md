@@ -1,6 +1,6 @@
-# markd — Documentation
+# notd — Documentation
 
-markd is a local Markdown editor, block outliner, and graph reader compatible with the essential Logseq file structure. Markdown files remain the source of truth; markd does not introduce a proprietary data format.
+notd is a local Markdown editor, block outliner, and graph reader compatible with the essential Logseq file structure. Markdown files remain the source of truth; notd does not introduce a proprietary data format.
 
 ## Quick start
 
@@ -25,6 +25,26 @@ Open `http://localhost:4176` on the server or `http://SERVER-IP:4176` from anoth
 
 > The graph API currently has no application authentication. Use it only on a trusted network and do not expose it directly to the internet. Username/password authentication should be added before public deployment.
 
+## Installation and PWA
+
+notd can run in a normal browser tab or as an installed Progressive Web App. Installation requires HTTPS, except on `localhost`.
+
+### iPhone and iPad
+
+1. Open notd in Safari.
+2. Use **Share → Add to Home Screen**.
+3. Launch notd from its Home Screen icon.
+
+To install a renamed version or force an icon/name change, remove the existing Home Screen app, open the site again in Safari, and add it again. iOS controls the keyboard’s own previous/next/done accessory bar; a web app cannot hide it.
+
+### Desktop browsers
+
+Use the install button in the address bar or the browser menu. Chromium-based browsers provide the most complete local filesystem support. Browsers without the File System Access API can still use the server graph and download standalone documents.
+
+### Updating the installed app
+
+Open notd while online, close it completely, and launch it again. The Service Worker downloads the current application shell and removes obsolete caches. If an old interface remains, open the site once in the browser, reload it, then restart the installed app. As a last resort, remove and reinstall the PWA; graph files on disk are not deleted.
+
 ## Command palette
 
 Open the command palette with:
@@ -42,9 +62,9 @@ Open the page menu from the gear icon at the right side of the footer. It provid
 
 - **General** controls the light, dark, or system theme, the accent color, and Vim mode.
 - **Shortcuts** lists keyboard commands by section. Search the list, select a shortcut, and press a new key combination to replace it. Use **Reset** to restore its default.
-- **Documentation** contains this complete guide.
+- **Documentation** contains this complete guide. Its **On this page** menu jumps directly to every main section; on mobile it appears as a section selector.
 
-When a graph is open, these preferences and custom shortcuts are saved in `.markd/settings.json` and follow the graph across devices.
+When a graph is open, these preferences and custom shortcuts are saved in `.notd/settings.json` and follow the graph across devices.
 
 ### Graph maintenance commands
 
@@ -62,11 +82,11 @@ When a graph is open, the command palette also provides:
 
 ### Offline PWA use
 
-After a server graph has been opened successfully at least once, markd keeps a local replica of its notes and settings in IndexedDB. The installed PWA can then open the graph without a connection, edit existing notes, and create new pages or journals. Changes are applied immediately to the local index and placed in a persistent synchronization queue.
+After a server graph has been opened successfully at least once, notd keeps a local replica of its notes and settings in IndexedDB. The installed PWA can then open the graph without a connection, edit existing notes, and create new pages or journals. Changes are applied immediately to the local index and placed in a persistent synchronization queue.
 
 The footer reports **Offline** and the number of pending changes. Synchronization starts when the browser reports that it is online, when the PWA returns to the foreground, or when its window receives focus. This does not rely on Background Sync, which is unavailable on iOS; the PWA must be open or resumed for synchronization to run.
 
-Each queued write retains the server revision from which it started. If that revision is still current, the change is uploaded automatically. If the server version changed in the meantime, markd preserves the local operation and reports a synchronization conflict instead of overwriting either version. Page renaming, deletion, and attachment upload currently require a connection.
+Each queued write retains the server revision from which it started. If that revision is still current, the change is uploaded automatically. If the server version changed in the meantime, notd preserves the local operation and reports a synchronization conflict instead of overwriting either version. Page renaming, deletion, and attachment upload currently require a connection.
 
 The Service Worker caches only the application shell. Notes and pending operations are stored in IndexedDB rather than by indiscriminately caching graph API responses.
 
@@ -82,7 +102,7 @@ logseq/
   config.edn
 ```
 
-markd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Logseq aliases declared with `alias::` are searchable in the command palette; an alias result displays the canonical page title and opens that page. Logseq `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
+notd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Logseq aliases declared with `alias::` are searchable in the command palette; an alias result displays the canonical page title and opens that page. Logseq `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
 
 ### Open a page
 
@@ -90,17 +110,17 @@ Open the command palette and search for its title. Global search also includes b
 
 ### Create a page
 
-Type `[[`. markd immediately inserts `]]` and leaves the caret between the brackets:
+Type `[[`. notd immediately inserts `]]` and leaves the caret between the brackets:
 
 ```text
 [[|]]
 ```
 
-Enter a title. If the page does not exist, choose **Create page** and press `Enter`. The reference is completed, the page is created, and focus moves to the next block.
+Enter a title. If the page does not exist, choose **Create page** and press `Enter`. The reference is completed and the page is created. The caret remains immediately after the closing `]]`, so typing can continue in the same block.
 
 ### Rename a page
 
-Use **Rename document** or `F2`, edit the title, then select the minimal checkmark icon to save. The adjacent trash icon deletes the current page after confirmation. markd can update matching `[[...]]` references throughout the graph. Case-only changes such as `test` to `Test` are supported, including on case-insensitive filesystems. Journal pages cannot be renamed or deleted, preserving Logseq compatibility.
+Use **Rename document** or `F2`, edit the title, then select the minimal checkmark icon to save. The adjacent trash icon deletes the current page after confirmation. notd can update matching `[[...]]` references throughout the graph. Case-only changes such as `test` to `Test` are supported, including on case-insensitive filesystems. Journal pages cannot be renamed or deleted, preserving Logseq compatibility.
 
 ## Blocks and outliner
 
@@ -160,7 +180,7 @@ Click a reference to open its page. A missing page opens as a virtual page so it
 
 ### Block references
 
-Select a block and run **Copy block reference**. When required, markd adds:
+Select a block and run **Copy block reference**. When required, notd adds:
 
 ```text
 id:: UUID
@@ -178,7 +198,7 @@ Single pages show references grouped by source page. The source title and all ma
 
 ## Journals
 
-Opening a graph displays today's journal. If its file does not exist, markd creates it automatically.
+Opening a graph displays today's journal. If its file does not exist, notd creates it automatically.
 
 The default filename is:
 
@@ -186,14 +206,14 @@ The default filename is:
 journals/yyyy_MM_dd.md
 ```
 
-When a graph is opened for the first time, markd imports these compatible settings from `logseq/config.edn`:
+When a graph is opened for the first time, notd imports these compatible settings from `logseq/config.edn`:
 
 ```clojure
 :journal/file-name-format
 :journal/page-title-format
 ```
 
-The imported values are written to `.markd/settings.json`, which then becomes markd's source of truth. The original Logseq configuration is left unchanged, so an existing graph can be imported safely and subsequently managed by markd on every device.
+The imported values are written to `.notd/settings.json`, which then becomes notd's source of truth. The original Logseq configuration is left unchanged, so an existing graph can be imported safely and subsequently managed by notd on every device.
 
 Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page. When previous-year entries exist and today's journal is empty, its first empty block is shown below the title and task count, followed by the **on this day** timeline. The timeline moves to a collapsible link at the bottom of today's entry as soon as the empty block receives focus. The timeline includes all top-level blocks created on the same month and day in previous years; blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline.
 
@@ -221,7 +241,7 @@ Type `<` to use structural insertion commands:
 
 ## Vim mode
 
-Run **Toggle Vim mode** from the command palette. For an open graph, the setting persists in `.markd/settings.json` and follows the graph across devices.
+Run **Toggle Vim mode** from the command palette. For an open graph, the setting persists in `.notd/settings.json` and follows the graph across devices.
 
 ### Modes
 
@@ -254,16 +274,24 @@ Press `?` in Normal mode to open this documentation.
 
 ## Navigation
 
-markd keeps page history, including journals, zoom state, and scroll position:
+notd keeps page history, including journals, zoom state, and scroll position:
 
 - `Alt + ←`: back;
 - `Alt + →`: forward.
 
 The graph name in the top-left corner opens the command palette.
 
+## Data storage and backups
+
+Markdown files remain the authoritative graph data. notd stores graph preferences in `.notd/settings.json`; this includes appearance, shortcuts, Vim mode, recent pages, collapsed blocks, and journal formats. The folder can be included in normal graph backups.
+
+The browser stores recovery drafts, the selected local directory handle, remote offline replicas, and queued synchronization operations in IndexedDB. Standalone documents and their local preferences use browser storage. Clearing site data removes those browser-only copies and permissions, but does not delete Markdown files from a selected graph directory.
+
+Keep regular backups before bulk renames, asset cleanup, or simultaneous editing from multiple applications. Do not treat the offline browser replica as the only backup.
+
 ## Saving and conflicts
 
-Changes are saved automatically after a short delay. Before writing to the filesystem, markd stores a recovery draft in IndexedDB.
+Changes are saved automatically after a short delay. Before writing to the filesystem, notd stores a recovery draft in IndexedDB.
 
 Possible states include:
 
@@ -273,7 +301,7 @@ Possible states include:
 - **Conflict**;
 - **Save failed**.
 
-If a file changes externally while local edits are pending, markd does not overwrite it automatically. A manual save lets the user explicitly choose whether to replace the disk version.
+If a file changes externally while local edits are pending, notd does not overwrite it automatically. A manual save lets the user explicitly choose whether to replace the disk version.
 
 ## LAN synchronization
 
@@ -287,7 +315,7 @@ When running through `server.py`:
 
 ## Assets
 
-Use `/upload` inside a graph block to select any file. markd stores it in the graph root’s `assets/` directory, preserves the original name when available, and inserts a Markdown link; images use image Markdown automatically. If a filename already exists, markd appends `-1`, `-2`, and so on.
+Use `/upload` inside a graph block to select any file. notd stores it in the graph root’s `assets/` directory, preserves the original name when available, and inserts a Markdown link; images use image Markdown automatically. If a filename already exists, notd appends `-1`, `-2`, and so on.
 
 ```markdown
 ![Photo](/assets/photo.png)
@@ -298,7 +326,7 @@ Removing a link or its block does not delete the file. Run **Clean orphaned asse
 
 ## Single-document editor
 
-markd also works without a graph:
+notd also works without a graph:
 
 - `⌘/Ctrl + N`: new document;
 - `⌘/Ctrl + O`: open Markdown;
@@ -337,13 +365,39 @@ Available themes:
 - Dark;
 - System, which switches automatically when the operating-system preference changes.
 
-For an open graph, the selected theme persists in `.markd/settings.json` and follows the graph across devices.
+For an open graph, the selected theme persists in `.notd/settings.json` and follows the graph across devices.
 
 Fonts and the main colors for the light and dark themes can be customized in `theme-config.css`. This file is loaded after the application stylesheet, so its CSS variables override the defaults without requiring changes to `styles.css`.
 
+## Troubleshooting
+
+### Old name or interface still appears
+
+The installed PWA may still be displaying an obsolete cached shell. Open the site while online, reload it, close the PWA completely, and reopen it. On iOS, reinstall the Home Screen app when its displayed name or icon does not update.
+
+### Pages, suggestions, or linked references are duplicated
+
+Check the graph for accidentally nested copies such as `pages/pages/` or `journals/journals/`. notd ignores these common import mistakes, but removing the duplicate directories avoids confusion in Logseq and other tools. Run **Sync all notes and backlinks** after fixing files externally.
+
+### Mobile shortcut toolbar is missing
+
+The indentation, movement, undo/redo, `[[ ]]`, and `(( ))` toolbar appears while editing a graph block on a touch device. In the installed PWA it is positioned above the software keyboard. Close and reopen the current block after rotating the device or reconnecting a hardware keyboard.
+
+### Local graph does not reopen
+
+Browser directory permission may have expired. Run **Open local graph** again and select the same graph directory. Clearing browser site data also clears the remembered directory handle.
+
+### Offline changes do not synchronize
+
+Open the PWA while connected and keep it in the foreground. iOS does not provide reliable background synchronization for PWAs. Check the footer for pending operations; a conflict requires reviewing the server and local versions rather than silently overwriting either one.
+
+### Documentation appears outdated
+
+Documentation is fetched without using the browser HTTP cache. Restart the PWA to activate the newest Service Worker if this guide still differs from the deployed `DOCUMENTATION.md` file.
+
 ## Privacy and security
 
-In local mode, content is not sent to external services. In LAN mode, content is exchanged only with the configured markd server.
+In local mode, content is not sent to external services. In LAN mode, content is exchanged only with the configured notd server.
 
 The LAN server:
 
@@ -358,6 +412,6 @@ Back up the graph regularly, especially before bulk renames or concurrent editin
 
 ## Logseq compatibility
 
-markd preserves the essential Logseq Markdown structure: pages, journals, nested blocks, properties, page references, block references, aliases, tags, and assets.
+notd preserves the essential Logseq Markdown structure: pages, journals, nested blocks, properties, page references, block references, aliases, tags, and assets.
 
 Logseq-specific features such as plugins, advanced queries, whiteboards, PDF annotation, and proprietary sync are not executed. Unknown syntax is retained in Markdown whenever possible.

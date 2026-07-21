@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve markd and an optional writable graph over HTTP.
+"""Serve notd and an optional writable graph over HTTP.
 
 The graph API is intended for trusted local networks. Add application authentication
 before exposing the service beyond a controlled network.
@@ -67,7 +67,7 @@ class EventBroker:
 
 class GraphWatcher(threading.Thread):
     def __init__(self, graph: Path, broker: EventBroker) -> None:
-        super().__init__(name="markd-graph-watcher", daemon=True)
+        super().__init__(name="notd-graph-watcher", daemon=True)
         self.graph = graph
         self.broker = broker
         self.stopped = threading.Event()
@@ -80,7 +80,13 @@ class GraphWatcher(threading.Thread):
         for folder_name in ("pages", "journals"):
             folder = self.graph / folder_name
             if folder.is_dir():
-                candidates.extend(path for path in folder.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES)
+                candidates.extend(
+                    path for path in folder.rglob("*")
+                    if path.is_file()
+                    and not path.is_symlink()
+                    and path.suffix.lower() in MARKDOWN_SUFFIXES
+                    and path.relative_to(folder).parts[0].lower() != folder_name
+                )
         for path in candidates:
             try:
                 result[path.relative_to(self.graph).as_posix()] = str(path.stat().st_mtime_ns)
@@ -124,8 +130,8 @@ def journal_config(graph: Path) -> dict[str, str]:
     }
 
 
-class MarkdHandler(SimpleHTTPRequestHandler):
-    server_version = "markd/1"
+class NotdHandler(SimpleHTTPRequestHandler):
+    server_version = "notd/1"
     protocol_version = "HTTP/1.1"
 
     @property
@@ -234,7 +240,13 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         for folder_name in ("pages", "journals"):
             folder = self.graph / folder_name
             if folder.is_dir():
-                candidates.extend(path for path in folder.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES)
+                candidates.extend(
+                    path for path in folder.rglob("*")
+                    if path.is_file()
+                    and not path.is_symlink()
+                    and path.suffix.lower() in MARKDOWN_SUFFIXES
+                    and path.relative_to(folder).parts[0].lower() != folder_name
+                )
         unique = sorted(set(candidates))
         if len(unique) > MAX_GRAPH_FILES:
             raise ValueError(f"Graph contains more than {MAX_GRAPH_FILES} Markdown files")
@@ -323,7 +335,7 @@ class MarkdHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/graph/status":
                 return self.json_response({"enabled": True, "name": self.graph.name, "config": journal_config(self.graph)})
             if parsed.path == "/api/graph/settings":
-                target = self.graph / ".markd" / "settings.json"
+                target = self.graph / ".notd" / "settings.json"
                 if not target.is_file():
                     raise FileNotFoundError("settings.json")
                 settings = json.loads(target.read_text(encoding="utf-8"))
@@ -450,7 +462,7 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                     raise ValueError("Graph settings must be a JSON object")
                 content = json.dumps(settings, ensure_ascii=False, indent=2) + "\n"
                 with self.server.mutation_lock:  # type: ignore[attr-defined]
-                    self.atomic_write(self.graph / ".markd" / "settings.json", content)
+                    self.atomic_write(self.graph / ".notd" / "settings.json", content)
                 return self.json_response({"saved": True})
             except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
                 return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
@@ -473,7 +485,7 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                     raise ValueError("Incomplete upload")
                 target = self.write_asset(target, content)
                 relative = target.relative_to(self.graph).as_posix()
-                self.broker.publish({"type": "asset", "path": relative, "clientId": self.headers.get("X-Markd-Client")})
+                self.broker.publish({"type": "asset", "path": relative, "clientId": self.headers.get("X-Notd-Client")})
                 return self.json_response({"path": relative})
             except (ValueError, OSError) as error:
                 return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
@@ -532,7 +544,7 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                     raise FileNotFoundError(raw_path)
                 target.unlink()
             relative = target.relative_to(self.graph).as_posix()
-            self.broker.publish({"type": "asset-deleted", "path": relative, "clientId": self.headers.get("X-Markd-Client")})
+            self.broker.publish({"type": "asset-deleted", "path": relative, "clientId": self.headers.get("X-Notd-Client")})
             self.json_response({"path": relative})
         except FileNotFoundError:
             self.error_json(HTTPStatus.NOT_FOUND, "Asset not found")
@@ -597,8 +609,8 @@ class MarkdHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Serve markd and a writable local graph")
-    parser.add_argument("--host", default="127.0.0.1", help="Use 0.0.0.0 to make markd reachable on the LAN")
+    parser = argparse.ArgumentParser(description="Serve notd and a writable local graph")
+    parser.add_argument("--host", default="127.0.0.1", help="Use 0.0.0.0 to make notd reachable on the LAN")
     parser.add_argument("--port", type=int, default=4173)
     parser.add_argument("--graph", type=Path, help="Path to a Logseq graph exposed through the API")
     arguments = parser.parse_args()
@@ -608,7 +620,7 @@ def main() -> None:
     if graph and not graph.is_dir():
         parser.error(f"Graph directory does not exist: {graph}")
     def handler(*args, **kwargs):
-        return MarkdHandler(*args, directory=str(app_directory), **kwargs)
+        return NotdHandler(*args, directory=str(app_directory), **kwargs)
 
     server = ThreadingHTTPServer((arguments.host, arguments.port), handler)
     server.graph = graph  # type: ignore[attr-defined]
@@ -620,7 +632,7 @@ def main() -> None:
     if server.watcher:
         server.watcher.start()
     location = f"http://{arguments.host}:{arguments.port}"
-    print(f"markd: {location}")
+    print(f"notd: {location}")
     print(f"graph: {graph if graph else 'disabled'}")
     if arguments.host not in {"127.0.0.1", "localhost", "::1"} and graph:
         print("warning: the writable graph has no authentication; use only on a trusted LAN")

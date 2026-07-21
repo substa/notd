@@ -1,6 +1,6 @@
 {
-  "name": "markd — Markdown editor",
-  "short_name": "markd",
+  "name": "notd — Markdown editor",
+  "short_name": "notd",
   "description": "A minimal, local, offline Markdown editor.",
   "start_url": "./",
   "scope": "./",
