@@ -78,6 +78,8 @@ test('indexes page and block references', () => {
   const index = new Graph.GraphIndex(pages);
 
   assert.equal(index.referencesToPage('target').length, 1);
+  assert.equal(index.resolvePage('Alias').title, 'Target');
+  assert.equal(index.aliasesForPage(pages[1]).join(','), 'Alias');
   assert.equal(index.resolveBlock('12345678-abcd').page.title, 'Target');
   assert.equal(index.search('referenced').length, 1);
 });

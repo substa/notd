@@ -38,7 +38,7 @@ Use the palette to find pages and blocks, change themes, open files, navigate jo
 
 ## Settings
 
-Open **Settings** from the three-dot icon in the upper-right corner or press `⌘/Ctrl + ,`.
+Open the page menu from the gear icon at the right side of the footer. It provides **New page**, **Delete page** when the current page can be deleted, **Settings**, **Shortcuts**, and **Documentation**. You can also open Settings directly with `⌘/Ctrl + ,`.
 
 - **General** controls the light, dark, or system theme, the accent color, and Vim mode.
 - **Shortcuts** lists keyboard commands by section. Search the list, select a shortcut, and press a new key combination to replace it. Use **Reset** to restore its default.
@@ -72,7 +72,7 @@ logseq/
   config.edn
 ```
 
-markd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Logseq `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
+markd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Logseq aliases declared with `alias::` are searchable in the command palette; an alias result displays the canonical page title and opens that page. Logseq `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
 
 ### Open a page
 
@@ -164,7 +164,7 @@ The copied reference has this form:
 
 ### Linked references
 
-Single pages show references grouped by source page. The source title and all matching blocks share one card. Unlinked references are available on demand, while block references are shown when a referenced block is zoomed.
+Single pages show references grouped by source page. The source title and all matching blocks share one card. Reference groups are always ordered from the most recent source page to the oldest. For journals, the date displayed in the page title is authoritative; the filename-derived date is used only when the title cannot be parsed. This keeps imported journals correctly ordered when their filenames contain different dates. Other pages use `created-at::`, `created::`, or the file modification date. Unlinked references are available on demand, while block references are shown when a referenced block is zoomed.
 
 ## Journals
 

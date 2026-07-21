@@ -1492,8 +1492,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function renderReferences(includeUnlinked = false) {
     if (!state.graphMode || !graphIndex || !state.graphPage || (state.journalMode && !state.graphZoomId)) { references.innerHTML = ''; return; }
-    const creationTimestamp = page => {
-      const value = MarkdGraph.propertiesFrom(page.content || '')['created-at'] || page.lastModified;
+    const dateValueTimestamp = value => {
       if (!value) return 0;
       let date;
       if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
@@ -1503,6 +1502,22 @@ Open, save, export, and reach recent documents or headings from the command pale
         date = new Date(timestamp);
       }
       return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    };
+    const journalTitleTimestamp = page => {
+      if (!page.journal && !String(page.path || '').startsWith('journals/')) return 0;
+      const configured = MarkdGraph.parseJournalDate(String(page.title || ''), graphStore?.config?.pageTitleFormat);
+      if (configured) return configured.getTime();
+      // Date.parse does not consistently accept English ordinal suffixes.
+      const title = String(page.title || '').replace(/(\d)(st|nd|rd|th)\b/gi, '$1');
+      const parsed = Date.parse(title); return Number.isNaN(parsed) ? 0 : parsed;
+    };
+    const creationTimestamp = page => {
+      // Imported journals can have a filename date different from their title.
+      // The displayed title is authoritative, then the filename-derived date.
+      const titleTimestamp = journalTitleTimestamp(page); if (titleTimestamp) return titleTimestamp;
+      const journalTimestamp = dateValueTimestamp(page.journalDate); if (journalTimestamp) return journalTimestamp;
+      const properties = MarkdGraph.propertiesFrom(page.content || '');
+      return dateValueTimestamp(properties['created-at'] || properties.created || page.lastModified);
     };
     const creationDate = page => {
       const timestamp = creationTimestamp(page);
@@ -1522,7 +1537,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     const renderGroups = (items, limit = false) => {
       const groups = new Map();
       items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
-      const ordered = [...groups].sort(([, a], [, b]) => creationTimestamp(b[0].page) - creationTimestamp(a[0].page));
+      const ordered = [...groups].sort(([titleA, a], [titleB, b]) => {
+        const chronological = creationTimestamp(b[0].page) - creationTimestamp(a[0].page);
+        return chronological || titleA.localeCompare(titleB);
+      });
       const visible = limit ? ordered.slice(0, 5) : ordered;
       const rows = visible.map(([title, group]) => {
         const date = creationDate(group[0].page);
@@ -2845,8 +2863,8 @@ Open, save, export, and reach recent documents or headings from the command pale
   function closeDocumentation() {
     if (documentationView.hidden) return;
     documentationView.hidden = true; app.classList.remove('documentation-open');
-    if (documentationReturnFocus?.isConnected) documentationReturnFocus.focus();
-    else $('#settingsButton').focus();
+    if (documentationReturnFocus?.isConnected && !documentationReturnFocus.closest?.('[hidden]')) documentationReturnFocus.focus();
+    else $('#footerMenuButton').focus();
   }
 
   function exportHtml() {
@@ -3031,20 +3049,32 @@ Open, save, export, and reach recent documents or headings from the command pale
     let graphPages = [...graphHistory].reverse().map(entry => graphStore?.pages.find(page => page.path === entry.path)).filter(Boolean);
     graphPages.push(...storedPages);
     if (query && graphIndex) graphPages.push(...graphIndex.pageSuggestions());
-    graphPages = graphPages.filter(page => {
-      if (seen.has(page.path)) return false;
+    const matchedPages = graphPages.flatMap(page => {
+      if (seen.has(page.path)) return [];
       seen.add(page.path);
-      return !normalizedQuery || MarkdGraph.normalizePage(page.title).includes(normalizedQuery);
+      const aliases = graphIndex?.aliasesForPage(page) || [];
+      if (!normalizedQuery) return [{ page, aliases, matchedAlias: '' }];
+      const results = [];
+      const aliasKeys = new Set();
+      for (const alias of aliases) {
+        const key = MarkdGraph.normalizePage(alias);
+        if (!key.includes(normalizedQuery) || key === MarkdGraph.normalizePage(page.title) || aliasKeys.has(key)) continue;
+        aliasKeys.add(key); results.push({ page, aliases, matchedAlias: alias });
+      }
+      if (MarkdGraph.normalizePage(page.title).includes(normalizedQuery)) results.push({ page, aliases, matchedAlias: '' });
+      return results;
     }).slice(0, 80);
-    const pages = graphPages.map(page => ({
-      label: page.title, shortcut: page.journal ? 'Journal' : '', keywords: `graph page ${page.title}`,
+    const pages = matchedPages.map(({ page, aliases, matchedAlias }) => ({
+      label: matchedAlias || page.title,
+      shortcut: matchedAlias ? `Alias · ${page.title}` : (page.journal ? 'Journal' : ''),
+      keywords: `graph page ${page.title} ${aliases.join(' ')}`,
       run: () => loadGraphPage(page)
     }));
     const documents = getStoredDocs().filter(doc => !query || doc.name.toLowerCase().includes(searchQuery)).map(doc => ({
       label: doc.name, shortcut: relativeDate(doc.updated), keywords: 'recent files documents open',
       run: () => requestAction(() => loadMarkdown(doc.markdown, doc.name, { id: doc.id }))
     }));
-    const exactPage = graphIndex?.pageSuggestions().some(page => MarkdGraph.normalizePage(page.title) === normalizedQuery);
+    const exactPage = Boolean(graphIndex?.resolvePage(query)) || graphIndex?.pageSuggestions().some(page => MarkdGraph.normalizePage(page.title) === normalizedQuery);
     const createPage = query && graphStore && !exactPage ? [{
       label: `Create page “${query}”`, shortcut: 'Enter', createPage: true,
       run: () => requestAction(() => loadGraphPage(query, { create: true }))
@@ -3295,7 +3325,26 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !journalCalendar.hidden) closeJournalCalendar(); });
   $('#commandButton').addEventListener('click', () => showCommandPalette());
-  $('#settingsButton').addEventListener('click', () => showSettings('general'));
+  function closeFooterMenu() { $('#footerMenu').hidden = true; $('#footerMenuButton').setAttribute('aria-expanded', 'false'); }
+  function toggleFooterMenu() {
+    const opening = $('#footerMenu').hidden;
+    if (!opening) return closeFooterMenu();
+    const page = state.graphPage; $('[data-footer-action="delete-page"]').hidden = !state.graphMode || !page || page.journal || page.virtual;
+    $('#footerMenu').hidden = false; $('#footerMenuButton').setAttribute('aria-expanded', 'true');
+    requestAnimationFrame(() => $('#footerMenu button:not([hidden])')?.focus());
+  }
+  $('#footerMenuButton').addEventListener('click', event => { event.stopPropagation(); toggleFooterMenu(); });
+  $('#footerMenu').addEventListener('click', event => {
+    const action = event.target.closest('[data-footer-action]')?.dataset.footerAction; if (!action) return;
+    closeFooterMenu();
+    if (action === 'new-page') requestAction(createGraphPage);
+    else if (action === 'delete-page') deleteCurrentGraphPage();
+    else if (action === 'settings') showSettings('general');
+    else if (action === 'shortcuts') showSettings('shortcuts');
+    else if (action === 'documentation') showDocumentation();
+  });
+  document.addEventListener('pointerdown', event => { if (!$('#footerMenu').hidden && !$('#footerMenu').contains(event.target) && !$('#footerMenuButton').contains(event.target)) closeFooterMenu(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#footerMenu').hidden) { event.preventDefault(); closeFooterMenu(); $('#footerMenuButton').focus(); } });
   $('#settingsClose').addEventListener('click', closeDocumentation);
   $('.settings-nav').addEventListener('click', event => { const tab = event.target.closest('[data-settings-tab]')?.dataset.settingsTab; if (tab) showSettings(tab); });
   $('#settingsTheme').addEventListener('change', event => setTheme(event.target.value));

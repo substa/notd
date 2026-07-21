@@ -76,6 +76,11 @@
     return properties;
   }
 
+  function pageAliases(document) {
+    const properties = propertiesFrom((document?.preamble || []).join('\n'));
+    return String(properties.alias || '').split(',').map(item => item.trim().replace(/^\[\[|\]\]$/g, '')).filter(Boolean);
+  }
+
   function parseDocument(markdown = '') {
     const source = normalizePdfEmbeds(markdown).replace(/\r\n?/g, '\n');
     const lines = source.split('\n');
@@ -736,8 +741,7 @@
         [page.journalDate, formatJournalDate(date, 'yyyy_MM_dd'), formatJournalDate(date, 'MMM do, yyyy'), formatJournalDate(date, 'MMMM do, yyyy')]
           .forEach(alias => this.pages.set(normalizePage(alias), page));
       }
-      const pageProperties = propertiesFrom(document.preamble.join('\n'));
-      for (const alias of String(pageProperties.alias || '').split(',').map(item => item.trim().replace(/^\[\[|\]\]$/g, '')).filter(Boolean)) this.pages.set(normalizePage(alias), page);
+      for (const alias of pageAliases(document)) this.pages.set(normalizePage(alias), page);
     }
 
     addPage(page, content) {
@@ -791,6 +795,7 @@
 
     resolvePage(title) { return this.pages.get(normalizePage(title)); }
     resolveBlock(uuid) { return this.uuids.get(normalizePage(uuid)); }
+    aliasesForPage(page) { return pageAliases(this.documents.get(page?.path)); }
     referencesToPage(title) {
       const page = this.resolvePage(title);
       const aliases = page ? [...this.pages].filter(([, candidate]) => candidate === page).map(([key]) => key) : [normalizePage(title)];
