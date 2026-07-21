@@ -45,6 +45,10 @@ Use the install button in the address bar or the browser menu. Chromium-based br
 
 Open notd while online, close it completely, and launch it again. The Service Worker downloads the current application shell and removes obsolete caches. If an old interface remains, open the site once in the browser, reload it, then restart the installed app. As a last resort, remove and reinstall the PWA; graph files on disk are not deleted.
 
+### Docker and Pangolin
+
+The repository includes `Dockerfile`, `compose.yaml`, `.env.example`, and a complete [Docker and Pangolin deployment guide](./DEPLOYMENT.md). The container exposes notd only on server loopback for diagnostics and on a private Docker network shared with Newt. Pangolin must require authentication before forwarding traffic to `http://notd:4176`; never expose the writable Python API directly to the internet.
+
 ## Command palette
 
 Open the command palette with:

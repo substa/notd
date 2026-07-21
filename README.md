@@ -35,6 +35,12 @@ node --test tests/graph.test.js
 
 The app is entirely static and can be deployed to any HTTPS host, including GitHub Pages, Netlify, Vercel, or nginx. HTTPS enables the PWA and File System Access API in supported browsers.
 
+## Deploy with Docker and Pangolin
+
+A production-oriented Compose setup is included for running one writable graph behind Pangolin authentication. It uses a read-only container filesystem, host UID/GID mapping, a loopback-only diagnostic port, and a private Docker network shared with Newt.
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for installation, Pangolin resource configuration, PWA setup, updates, backups, and troubleshooting.
+
 ## Features
 
 - distraction-free interface with files, recent documents, outline, themes, and tools collected in the command palette;

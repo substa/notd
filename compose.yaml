@@ -1,0 +1,29 @@
+services:
+  notd:
+    build:
+      context: .
+    image: notd:local
+    container_name: notd
+    restart: unless-stopped
+    init: true
+    user: "${NOTD_UID:-1000}:${NOTD_GID:-1000}"
+    ports:
+      - "127.0.0.1:${NOTD_PORT:-4176}:4176"
+    expose:
+      - "4176"
+    volumes:
+      - "${NOTD_GRAPH_PATH:?Set NOTD_GRAPH_PATH in .env}:/graph:rw"
+    networks:
+      - pangolin
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  pangolin:
+    external: true
+    name: "${PANGOLIN_NETWORK:-pangolin}"

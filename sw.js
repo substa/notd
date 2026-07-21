@@ -1,5 +1,5 @@
-const CACHE = 'notd-editor-v2';
-const ASSETS = ['./', './index.html', './styles.css', './theme-config.css', './graph.js', './app.js', './DOCUMENTATION.md', './manifest.webmanifest', './favicon.ico', './favicon-16x16.png', './favicon-32x32.png', './apple-touch-icon.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
+const CACHE = 'notd-editor-v3';
+const ASSETS = ['./', './index.html', './styles.css', './theme-config.css', './graph.js', './app.js', './DOCUMENTATION.md', './DEPLOYMENT.md', './manifest.webmanifest', './favicon.ico', './favicon-16x16.png', './favicon-32x32.png', './apple-touch-icon.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 const STATIC_PATHS = new Set(ASSETS.map(path => new URL(path, self.location.href).pathname));
 
 self.addEventListener('install', event => event.waitUntil(
