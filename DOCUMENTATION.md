@@ -60,6 +60,16 @@ When a graph is open, the command palette also provides:
 
 ## Graphs
 
+### Offline PWA use
+
+After a server graph has been opened successfully at least once, markd keeps a local replica of its notes and settings in IndexedDB. The installed PWA can then open the graph without a connection, edit existing notes, and create new pages or journals. Changes are applied immediately to the local index and placed in a persistent synchronization queue.
+
+The footer reports **Offline** and the number of pending changes. Synchronization starts when the browser reports that it is online, when the PWA returns to the foreground, or when its window receives focus. This does not rely on Background Sync, which is unavailable on iOS; the PWA must be open or resumed for synchronization to run.
+
+Each queued write retains the server revision from which it started. If that revision is still current, the change is uploaded automatically. If the server version changed in the meantime, markd preserves the local operation and reports a synchronization conflict instead of overwriting either version. Page renaming, deletion, and attachment upload currently require a connection.
+
+The Service Worker caches only the application shell. Notes and pending operations are stored in IndexedDB rather than by indiscriminately caching graph API responses.
+
 A graph can contain:
 
 ```text

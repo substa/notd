@@ -55,6 +55,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - desktop/mobile layouts and offline PWA support;
 - local graphs backed by `pages/`, `journals/`, and Markdown files;
 - automatic filesystem saves with IndexedDB recovery drafts and external-change detection;
+- offline server-graph replicas with queued page creation and edits that synchronize when the PWA reconnects;
 - nested blocks with keyboard indentation, reordering, collapse, zoom, and task cycling;
 - `[[page references]]`, page creation/autocomplete, `((block references))`, linked and unlinked references;
 - graph-wide page switching and block search from the command palette;
@@ -68,7 +69,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 
 ## Privacy
 
-In direct local mode, no content is sent to a server. Automatic copies of standalone documents are stored in `localStorage`; graph recovery drafts and the selected directory handle are stored in IndexedDB. Graph preferences—including theme, Vim mode, collapsed blocks, recent pages, and journal formats—are stored in `.markd/settings.json` inside the graph, so they follow the same graph across devices. On first import, compatible journal formats are copied from `logseq/config.edn`; afterward `.markd/settings.json` is authoritative for markd. When `server.py --graph` is used, content is exchanged only with that markd server. The Markdown files in the selected or served graph remain the source of truth.
+In direct local mode, no content is sent to a server. Automatic copies of standalone documents are stored in `localStorage`; graph recovery drafts, remote graph replicas, pending offline operations, and the selected directory handle are stored in IndexedDB. Graph preferences—including theme, Vim mode, collapsed blocks, recent pages, and journal formats—are stored in `.markd/settings.json` inside the graph, so they follow the same graph across devices. On first import, compatible journal formats are copied from `logseq/config.edn`; afterward `.markd/settings.json` is authoritative for markd. When `server.py --graph` is used, content is exchanged only with that markd server. The Markdown files in the selected or served graph remain the source of truth.
 
 ## Local graph support
 

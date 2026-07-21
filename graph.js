@@ -2,7 +2,7 @@
   'use strict';
 
   const DB_NAME = 'markd-graph-v1';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const HANDLE_KEY = 'last-graph';
   const markdownFile = /\.(md|markdown)$/i;
 
@@ -33,6 +33,7 @@
         const db = request.result;
         if (!db.objectStoreNames.contains('state')) db.createObjectStore('state');
         if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts');
+        if (!db.objectStoreNames.contains('remoteGraphs')) db.createObjectStore('remoteGraphs');
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -55,6 +56,8 @@
   const saveDraft = (path, value) => dbRequest('drafts', 'readwrite', store => store.put({ ...value, savedAt: Date.now() }, path));
   const getDraft = path => dbRequest('drafts', 'readonly', store => store.get(path));
   const removeDraft = path => dbRequest('drafts', 'readwrite', store => store.delete(path));
+  const getRemoteGraph = key => dbRequest('remoteGraphs', 'readonly', store => store.get(key));
+  const saveRemoteGraph = (key, value) => dbRequest('remoteGraphs', 'readwrite', store => store.put(value, key));
 
   function indentationWidth(value) {
     let width = 0;
@@ -529,14 +532,27 @@
       this.pages = [];
       this.isRemote = true;
       this.clientId = newId();
+      this.offline = false;
+      this.pendingCount = 0;
+      this.cache = null;
     }
 
     static async connect(baseUrl = '/api/graph') {
-      const response = await fetch(`${baseUrl}/status`, { cache: 'no-store' });
-      if (!response.ok) throw new Error('No server graph is available');
-      const status = await response.json();
-      if (!status.enabled) throw new Error('The server graph is disabled');
-      return new RemoteGraphStore(status, baseUrl);
+      const cached = await getRemoteGraph(baseUrl).catch(() => null);
+      try {
+        const response = await fetch(`${baseUrl}/status`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('No server graph is available');
+        const status = await response.json();
+        if (!status.enabled) throw new Error('The server graph is disabled');
+        const store = new RemoteGraphStore(status, baseUrl);
+        store.cache = { ...(cached || {}), status, operations: cached?.operations || [] }; store.pendingCount = store.cache.operations.length;
+        store.offline = store.pendingCount > 0;
+        await saveRemoteGraph(baseUrl, store.cache).catch(() => {}); return store;
+      } catch (error) {
+        if (!cached?.status || !cached?.files) throw error;
+        const store = new RemoteGraphStore(cached.status, baseUrl);
+        store.cache = cached; store.offline = true; store.pendingCount = (cached.operations || []).length; return store;
+      }
     }
 
     async api(path, options = {}) {
@@ -550,6 +566,36 @@
 
     async ensurePermission() { return true; }
 
+    networkFailure(error) { return error instanceof TypeError || /fetch|network|offline|load failed/i.test(String(error?.message || error)); }
+
+    async persistCache() {
+      this.cache = this.cache || { status: { enabled: true, name: this.name, config: this.config }, files: { files: [], config: this.config }, operations: [] };
+      this.pendingCount = (this.cache.operations || []).length;
+      await saveRemoteGraph(this.baseUrl, this.cache);
+    }
+
+    cacheFile(path, content, revision = null, remove = false) {
+      this.cache = this.cache || { status: { enabled: true, name: this.name, config: this.config }, files: { files: [], config: this.config }, operations: [] };
+      const files = this.cache.files?.files || [];
+      this.cache.files = { ...(this.cache.files || {}), config: this.config, files: remove ? files.filter(file => file.path !== path) : [...files.filter(file => file.path !== path), {
+        ...(files.find(file => file.path === path) || {}), path, name: path.split('/').at(-1), folder: path.includes('/') ? path.split('/').slice(0, -1).join('/') : '', content, revision
+      }] };
+    }
+
+    async queueOperation(operation) {
+      this.cache = this.cache || { status: { enabled: true, name: this.name, config: this.config }, files: { files: [], config: this.config }, operations: [] };
+      const operations = [...(this.cache.operations || [])];
+      if (operation.type === 'write') {
+        const index = operations.findIndex(item => item.type === 'write' && item.path === operation.path);
+        if (index >= 0) operation = { ...operation, expectedRevision: operations[index].expectedRevision, create: operations[index].create || operation.create };
+        if (index >= 0) operations.splice(index, 1);
+      } else if (operation.type === 'settings') {
+        for (let index = operations.length - 1; index >= 0; index--) if (operations[index].type === 'settings') operations.splice(index, 1);
+      }
+      operations.push({ ...operation, queuedAt: Date.now() }); this.cache.operations = operations; this.offline = true;
+      await this.persistCache();
+    }
+
     applySettings(settings = {}) {
       if (!settings.journal || typeof settings.journal !== 'object') return;
       this.config = {
@@ -560,15 +606,23 @@
     }
 
     async readSettings() {
-      try { return await this.api('/settings'); }
-      catch (error) { if (/\(404\)|not found/i.test(error.message)) return null; throw error; }
+      if (this.offline) return this.cache?.settings || null;
+      try {
+        const settings = await this.api('/settings'); this.cache.settings = settings; await this.persistCache(); return settings;
+      } catch (error) {
+        if (/\(404\)|not found/i.test(error.message)) return this.cache?.settings || null;
+        if (this.networkFailure(error) && this.cache) { this.offline = true; return this.cache.settings || null; }
+        throw error;
+      }
     }
 
     async writeSettings(settings) {
-      await this.api('/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings, clientId: this.clientId })
-      });
+      this.cache = this.cache || {}; this.cache.settings = settings;
+      if (this.offline) return this.queueOperation({ type: 'settings', settings });
+      try {
+        await this.api('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings, clientId: this.clientId }) });
+        await this.persistCache();
+      } catch (error) { if (this.networkFailure(error)) return this.queueOperation({ type: 'settings', settings }); throw error; }
     }
 
     subscribe(listener) {
@@ -596,7 +650,13 @@
     }
 
     async scan() {
-      const payload = await this.api('/files');
+      let payload;
+      if (this.offline) payload = this.cache?.files;
+      else {
+        try { payload = await this.api('/files'); this.cache.files = payload; await this.persistCache(); }
+        catch (error) { if (!this.networkFailure(error) || !this.cache?.files) throw error; this.offline = true; payload = this.cache.files; }
+      }
+      if (!payload) throw new Error('No offline graph copy is available');
       if (!this.settingsConfig) this.config = { ...defaultJournalConfig, ...(payload.config || {}) };
       this.pages = payload.files.map(file => this.pageFromFile(file)).sort((a, b) => a.title.localeCompare(b.title));
       return this.pages;
@@ -622,14 +682,46 @@
     }
 
     async writePage(page, content, options = {}) {
-      const payload = await this.api('/file', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: page.path, content, expectedRevision: page.lastModified, force: Boolean(options.force), create: Boolean(options.create), clientId: this.clientId })
-      });
-      page.content = content; page.lastModified = payload.revision; return page;
+      const operation = { type: 'write', path: page.path, content, expectedRevision: page.lastModified, force: Boolean(options.force), create: Boolean(options.create) };
+      if (this.offline) {
+        page.content = content; this.cacheFile(page.path, content, page.lastModified); await this.queueOperation(operation); return page;
+      }
+      try {
+        const payload = await this.api('/file', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: page.path, content, expectedRevision: page.lastModified, force: Boolean(options.force), create: Boolean(options.create), clientId: this.clientId })
+        });
+        page.content = content; page.lastModified = payload.revision; this.cacheFile(page.path, content, payload.revision); await this.persistCache(); return page;
+      } catch (error) {
+        if (!this.networkFailure(error)) throw error;
+        page.content = content; this.cacheFile(page.path, content, page.lastModified); await this.queueOperation(operation); return page;
+      }
+    }
+
+    async syncPending() {
+      const operations = [...(this.cache?.operations || [])];
+      if (!operations.length) { this.offline = false; return 0; }
+      let completed = 0;
+      for (const operation of operations) {
+        try {
+          if (operation.type === 'settings') {
+            await this.api('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: operation.settings, clientId: this.clientId }) });
+          } else if (operation.type === 'write') {
+            const payload = await this.api('/file', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: operation.path, content: operation.content, expectedRevision: operation.expectedRevision, force: operation.force, create: operation.create, clientId: this.clientId })
+            });
+            this.cacheFile(operation.path, operation.content, payload.revision);
+            const page = this.pages.find(item => item.path === operation.path); if (page) page.lastModified = payload.revision;
+          }
+          this.cache.operations.shift(); completed++; await this.persistCache();
+        } catch (error) { this.offline = this.networkFailure(error); throw error; }
+      }
+      this.offline = false; await this.persistCache(); return completed;
     }
 
     async renamePage(page, title, content) {
+      if (this.offline) throw new Error('Renaming pages requires a connection');
       const duplicate = this.pages.find(candidate => candidate !== page && normalizePage(candidate.title) === normalizePage(title));
       if (duplicate) throw new Error('A page with this name already exists');
       const folder = page.folder || 'pages'; const name = `${safeFilename(title)}.md`; const target = `${folder}/${name}`;
@@ -640,19 +732,22 @@
       });
       const renamed = { ...page, title, name, path: payload.path, content, lastModified: payload.revision };
       this.pages = this.pages.filter(item => item !== page); this.pages.push(renamed); this.pages.sort((a, b) => a.title.localeCompare(b.title));
+      this.cacheFile(page.path, '', null, true); this.cacheFile(renamed.path, content, payload.revision); await this.persistCache();
       await removeDraft(page.path).catch(() => {}); return renamed;
     }
 
     async deletePage(page) {
+      if (this.offline) throw new Error('Deleting pages requires a connection');
       await this.api('/file', {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: page.path, expectedRevision: page.lastModified, clientId: this.clientId })
       });
-      this.pages = this.pages.filter(item => item !== page);
+      this.pages = this.pages.filter(item => item !== page); this.cacheFile(page.path, '', null, true); await this.persistCache();
       await removeDraft(page.path).catch(() => {});
     }
 
     async freshFile(page) {
+      if (this.offline) return { content: page.content, lastModified: page.lastModified };
       const payload = await this.api(`/file?path=${encodeURIComponent(page.path)}`);
       return { content: payload.content, lastModified: payload.revision };
     }

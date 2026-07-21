@@ -1045,6 +1045,13 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
 
+  function graphStatusLabel(fallback = 'Ready') {
+    const offline = Boolean(graphStore?.isRemote && graphStore.offline); app.classList.toggle('offline-mode', offline);
+    if (!offline) return fallback;
+    const pending = graphStore.pendingCount || 0;
+    return pending ? `Offline · ${pending} pending` : 'Offline';
+  }
+
   function graphChanged() {
     if (!state.graphMode || !state.graphPage) return;
     state.dirty = true;
@@ -1075,7 +1082,7 @@ Open, save, export, and reach recent documents or headings from the command pale
         state.graphPage = created;
         graphIndex.rebuild(graphStore.pages);
         await MarkdGraph.removeDraft(page.path).catch(() => {});
-        state.dirty = false; app.classList.remove('dirty'); saveState.textContent = 'Saved';
+        state.dirty = false; app.classList.remove('dirty'); saveState.textContent = graphStatusLabel('Saved');
         return true;
       } catch (error) {
         saveState.textContent = 'Save failed'; if (interactive) toast(error.message || 'Could not create the page');
@@ -1096,7 +1103,7 @@ Open, save, export, and reach recent documents or headings from the command pale
         graphIndex.updatePage(page, content);
         await MarkdGraph.removeDraft(page.path).catch(() => {});
         if (state.graphPage === page && currentMarkdown() === content) {
-          state.dirty = false; app.classList.remove('dirty'); saveState.textContent = 'Saved';
+          state.dirty = false; app.classList.remove('dirty'); saveState.textContent = graphStatusLabel('Saved');
         }
         state.graphConflict = false;
         if (remoteRefreshPending) scheduleRemoteRefresh();
@@ -1218,7 +1225,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     rememberGraphPage(page);
     syncGraphRoute(page, options);
     renderGraphPage(); updateStats();
-    saveState.textContent = draftConflict ? 'Recovery conflict' : (draft ? 'Recovered draft' : 'Ready');
+    saveState.textContent = draftConflict ? 'Recovery conflict' : (draft ? 'Recovered draft' : graphStatusLabel());
     requestAnimationFrame(() => {
       if (options.blockId) blockTree.querySelector(`[data-block-id="${CSS.escape(options.blockId)}"]`)?.scrollIntoView({ block: 'center' });
       if (state.vimEnabled) focusVimEditor();
@@ -3763,7 +3770,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function watchRemoteGraph() {
     closeRemoteEvents?.(); closeRemoteEvents = null;
-    if (!graphStore?.isRemote || !graphStore.subscribe) return;
+    if (!graphStore?.isRemote || graphStore.offline || !graphStore.subscribe) return;
     closeRemoteEvents = graphStore.subscribe(event => {
       const currentPath = state.graphPage?.path;
       if (event.path === currentPath && event.revision && String(event.revision) === String(state.graphPage.lastModified)) return;
@@ -3774,6 +3781,36 @@ Open, save, export, and reach recent documents or headings from the command pale
       }
       scheduleRemoteRefresh();
     });
+  }
+
+  let remoteSyncing = null;
+  async function syncOfflineGraph() {
+    if (!graphStore?.isRemote || !navigator.onLine) return false;
+    if (remoteSyncing) return remoteSyncing;
+    const store = graphStore;
+    remoteSyncing = (async () => {
+      try {
+        const pending = store.pendingCount || 0; saveState.textContent = pending ? `Syncing ${pending} changes…` : 'Checking connection…';
+        const synced = await store.syncPending();
+        const pages = await store.scan();
+        if (graphStore !== store) return false;
+        graphIndex = new MarkdGraph.GraphIndex(pages); journalDocuments.clear();
+        const current = state.graphPage && pages.find(page => page.path === state.graphPage.path);
+        if (current && !state.dirty) {
+          state.graphPage = current; state.graphDocument = MarkdGraph.parseDocument(current.content); restoreGraphCollapse();
+          if (state.journalMode) journalDocuments.set(current.path, state.graphDocument);
+          renderGraphPage(); updateStats();
+        }
+        watchRemoteGraph(); app.classList.remove('offline-mode'); saveState.textContent = 'Ready';
+        if (synced) toast(`Synced ${synced} offline change${synced === 1 ? '' : 's'}`);
+        return true;
+      } catch (error) {
+        saveState.textContent = store.offline ? graphStatusLabel() : 'Sync conflict';
+        toast(error.name === 'ConflictError' ? 'Offline changes conflict with the server' : (error.message || 'Could not sync offline changes'));
+        return false;
+      } finally { remoteSyncing = null; }
+    })();
+    return remoteSyncing;
   }
 
   async function checkExternalGraphPage(force = false) {
@@ -3797,9 +3834,13 @@ Open, save, export, and reach recent documents or headings from the command pale
       if (state.journalMode) { journalDocuments.set(current.path, state.graphDocument); renderGraphPage(); }
       else if (current.lastModified !== previousModified) renderGraphPage();
       else renderReferences();
-    } catch {}
+    } catch { if (graphStore?.isRemote && graphStore.offline) saveState.textContent = graphStatusLabel(); }
   }
-  window.addEventListener('focus', checkExternalGraphPage);
+  window.addEventListener('online', () => syncOfflineGraph());
+  window.addEventListener('focus', () => {
+    if (graphStore?.isRemote && (graphStore.offline || graphStore.pendingCount)) syncOfflineGraph();
+    else checkExternalGraphPage();
+  });
   window.addEventListener('popstate', async () => {
     const route = graphRoute();
     if (!route) {
@@ -3813,7 +3854,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!page) return toast('Page in URL not found in this graph');
     await loadGraphPage(page, { journalMode: route.journalMode, routeNavigation: !route.legacy, replaceRoute: Boolean(route.legacy), resetJournalLimit: route.journalMode });
   });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkExternalGraphPage(); else if (state.graphMode) flushGraphSave(false); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (graphStore?.isRemote && (graphStore.offline || graphStore.pendingCount)) syncOfflineGraph(); else checkExternalGraphPage();
+    } else if (state.graphMode) flushGraphSave(false);
+  });
   let journalScrollLoading = false;
   markdWrap.addEventListener('scroll', () => {
     if (!state.journalMode || state.graphZoomId || activeGraphBlock || journalScrollLoading) return;
@@ -3861,6 +3906,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages); watchRemoteGraph();
       if (state.dirty) return;
       journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding({ replaceRoute: true });
+      saveState.textContent = graphStatusLabel();
+      if (navigator.onLine && (remote.offline || remote.pendingCount)) setTimeout(syncOfflineGraph, 0);
       return;
     } catch {}
     try {

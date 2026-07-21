@@ -133,6 +133,26 @@ test('resolves graph assets relative to the page folder', () => {
   assert.equal(Graph.resolveAssetPath('./images/image.jpg', 'pages/nested'), 'pages/nested/images/image.jpg');
 });
 
+test('queues and synchronizes remote page writes while offline', async () => {
+  const store = new Graph.RemoteGraphStore({ name: 'Remote' });
+  store.cache = { status: { name: 'Remote' }, files: { files: [], config: {} }, operations: [] };
+  store.offline = true;
+  store.persistCache = async function () { this.pendingCount = this.cache.operations.length; };
+  const page = { title: 'Offline', name: 'offline.md', path: 'pages/offline.md', folder: 'pages', content: '', lastModified: null };
+  store.pages = [page];
+
+  await store.writePage(page, '- local', { create: true });
+  assert.equal(store.pendingCount, 1);
+  assert.equal(store.cache.operations[0].create, true);
+  assert.equal(store.cache.files.files[0].content, '- local');
+
+  store.api = async () => ({ revision: '2' });
+  assert.equal(await store.syncPending(), 1);
+  assert.equal(store.pendingCount, 0);
+  assert.equal(page.lastModified, '2');
+  assert.equal(store.offline, false);
+});
+
 test('applies journal formats imported into graph settings', () => {
   const store = new Graph.GraphStore({ name: 'Notes' });
   store.applySettings({ journal: { fileNameFormat: 'yyyy-MM-dd', pageTitleFormat: 'MMMM do, yyyy' } });
