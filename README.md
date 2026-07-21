@@ -43,7 +43,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - block navigation with arrow keys or `Alt + ↑/↓`;
 - optional persistent Vim mode with Normal/Insert modes, `h/j/k/l`, word and document motions, `Ctrl-D/U`, and undo/redo with `u` and `Ctrl-R`;
 - command palette split between commands and recent pages, with a shared search field, available with `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
-- shortcuts for files, search, formatting, navigation, and appearance;
+- searchable, sectioned, and customizable shortcuts for files, search, formatting, navigation, and blocks;
 - visual Markdown editing and full source mode;
 - headings, links, quotes, lists, tasks, code blocks, and tables;
 - file picker and drag-and-drop opening;
@@ -64,7 +64,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 - clean, copyable client-side URLs such as `/pages/page-name` and `/journals/2026_07_18`, with browser back/forward navigation;
 - incremental in-browser index updates, avoiding a full graph reparse after each edit;
 - daily journals and safe page renaming with optional reference updates;
-- complete built-in documentation, always available with `?` or from the command palette.
+- a settings view for theme, accent color, Vim mode, shortcuts, and complete built-in documentation.
 
 ## Privacy
 

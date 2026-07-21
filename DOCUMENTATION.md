@@ -36,6 +36,16 @@ Open the command palette with:
 
 Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, manage graph maintenance, and open this documentation.
 
+## Settings
+
+Open **Settings** from the three-dot icon in the upper-right corner or press `⌘/Ctrl + ,`.
+
+- **General** controls the light, dark, or system theme, the accent color, and Vim mode.
+- **Shortcuts** lists keyboard commands by section. Search the list, select a shortcut, and press a new key combination to replace it. Use **Reset** to restore its default.
+- **Documentation** contains this complete guide.
+
+When a graph is open, these preferences and custom shortcuts are saved in `.markd/settings.json` and follow the graph across devices.
+
 ### Graph maintenance commands
 
 When a graph is open, the command palette also provides:
@@ -105,13 +115,26 @@ Editing does not add a border or background to the active block. To select block
 
 ## Tasks
 
-`⌘/Ctrl + Enter` cycles through:
+Task status controls behave consistently in journal blocks, regular pages, the journal task summary, and the complete task dashboard. Clicking the status indicator changes the state; clicking the task text in a dashboard still opens its source block.
+
+| Interaction | From `TODO` | From `DOING` | From `DONE` |
+| --- | --- | --- | --- |
+| Click or tap | `DONE` | `DONE` | `TODO` |
+| `Shift + click` | `DOING` | `TODO` | `DOING` |
+| Press and hold | `DOING` | `TODO` | `DOING` |
+| `⌘/Ctrl + Enter` while editing | `DOING` | `DONE` | `TODO` |
+
+A normal click is therefore the quick completion action. Use `Shift + click` when a task should be marked as in progress instead, or hold the status control for about half a second on a touch device. Moving the pointer or finger cancels the hold gesture. Devices that support vibration provide brief feedback when the long press is recognized.
+
+`Shift + click` on a task status is reserved for changing its state and does not extend the block selection. `⌘/Ctrl + Enter` preserves the complete keyboard workflow:
 
 ```text
-TODO → DOING → DONE → plain text
+TODO → DOING → DONE → TODO
 ```
 
-The task state can also be clicked directly.
+Changes made from a task summary or dashboard are written back to the task's original Markdown page. Before a task moves to another section or disappears from the current filtered list, its row briefly displays **Completed**, **In progress**, or **To do** to confirm the new state.
+
+Task-state changes participate in the regular undo/redo history, including changes made from summaries and dashboards. Use `⌘/Ctrl + Z` to restore the previous state and `⌘/Ctrl + Shift + Z` (or `⌘/Ctrl + Y`) to reapply it. Undo and redo update the task in its original Markdown page and show a confirmation message with the restored state.
 
 ## References
 

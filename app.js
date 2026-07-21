@@ -13,7 +13,7 @@
   const references = $('#references');
   const graphAutocomplete = $('#graphAutocomplete');
   const mobileBlockToolbar = $('#mobileBlockToolbar');
-  const documentationView = $('#documentationView');
+  const documentationView = $('#settingsView');
   const documentationContent = $('#documentationContent');
   const journalCalendar = $('#journalCalendar');
   const fileName = $('#fileName');
@@ -34,6 +34,63 @@
     graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
     journalMode: false, journalLimit: 1, referencesExpanded: false, onThisDayExpanded: false, onThisDayEmptyDismissed: false, taskView: null, taskLimits: {}, taskExpanded: {}
   };
+  const shortcutDefinitions = [
+    { id: 'settings', section: 'General', label: 'Open settings', keys: 'Mod+,' },
+    { id: 'documentation', section: 'General', label: 'Open documentation', keys: 'Shift+/' },
+    { id: 'commands', section: 'General', label: 'Command palette', keys: 'Mod+K' },
+    { id: 'commandsF1', section: 'General', label: 'Command palette (alternate)', keys: 'F1' },
+    { id: 'commandsSearch', section: 'General', label: 'Command palette (alternate 2)', keys: 'Mod+Shift+P' },
+    { id: 'rename', section: 'General', label: 'Rename document', keys: 'F2' },
+    { id: 'save', section: 'Documents', label: 'Save', keys: 'Mod+S' },
+    { id: 'open', section: 'Documents', label: 'Open file', keys: 'Mod+O' },
+    { id: 'new', section: 'Documents', label: 'New document', keys: 'Mod+N' },
+    { id: 'find', section: 'Documents', label: 'Find in document', keys: 'Mod+F' },
+    { id: 'source', section: 'Documents', label: 'Toggle Markdown source', keys: 'Mod+/' },
+    { id: 'export', section: 'Documents', label: 'Export HTML', keys: 'Mod+Shift+E' },
+    { id: 'today', section: 'Navigation', label: "Today's journal", keys: 'Mod+Shift+J' },
+    { id: 'back', section: 'Navigation', label: 'Previous page', keys: 'Alt+ArrowLeft' },
+    { id: 'forward', section: 'Navigation', label: 'Next page', keys: 'Alt+ArrowRight' },
+    { id: 'bold', section: 'Formatting', label: 'Bold', keys: 'Mod+B' },
+    { id: 'italic', section: 'Formatting', label: 'Italic', keys: 'Mod+I' },
+    { id: 'code', section: 'Formatting', label: 'Inline code', keys: 'Mod+`' },
+    { id: 'heading1', section: 'Formatting', label: 'Heading 1', keys: 'Mod+1' },
+    { id: 'heading2', section: 'Formatting', label: 'Heading 2', keys: 'Mod+2' },
+    { id: 'heading3', section: 'Formatting', label: 'Heading 3', keys: 'Mod+3' },
+    { id: 'orderedList', section: 'Formatting', label: 'Numbered list', keys: 'Mod+Shift+7' },
+    { id: 'bulletList', section: 'Formatting', label: 'Bulleted list', keys: 'Mod+Shift+8' },
+    { id: 'blockIndent', section: 'Blocks', label: 'Indent block', keys: 'Tab' },
+    { id: 'blockOutdent', section: 'Blocks', label: 'Outdent block', keys: 'Shift+Tab' },
+    { id: 'blockUp', section: 'Blocks', label: 'Move block up', keys: 'Alt+ArrowUp' },
+    { id: 'blockDown', section: 'Blocks', label: 'Move block down', keys: 'Alt+ArrowDown' },
+    { id: 'taskCycle', section: 'Blocks', label: 'Cycle task state', keys: 'Mod+Enter' },
+    { id: 'blockNew', section: 'Blocks', label: 'Create next block', keys: 'Enter' },
+    { id: 'blockLine', section: 'Blocks', label: 'Line break in block', keys: 'Shift+Enter' },
+    { id: 'blockDelete', section: 'Blocks', label: 'Delete empty or selected blocks', keys: 'Backspace' },
+    { id: 'blockEscape', section: 'Blocks', label: 'Finish editing or clear selection', keys: 'Escape' },
+    { id: 'undo', section: 'Editing', label: 'Undo', keys: 'Mod+Z' },
+    { id: 'redo', section: 'Editing', label: 'Redo', keys: 'Mod+Shift+Z' },
+    { id: 'redoAlt', section: 'Editing', label: 'Redo (alternate)', keys: 'Mod+Y' }
+  ];
+  const shortcutDefinition = id => shortcutDefinitions.find(item => item.id === id);
+  const shortcutValue = id => currentSettings().shortcuts?.[id] || shortcutDefinition(id)?.keys || '';
+  function eventBinding(event) {
+    if (['Control', 'Meta', 'Alt', 'Shift'].includes(event.key)) return '';
+    const modifiers = [];
+    if (event.metaKey || event.ctrlKey) modifiers.push('Mod');
+    if (event.shiftKey) modifiers.push('Shift');
+    if (event.altKey) modifiers.push('Alt');
+    let key = event.key;
+    const punctuation = { Slash: '/', Backquote: '`', Comma: ',', Period: '.', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']', Backslash: '\\', Minus: '-', Equal: '=' };
+    if (/^Key[A-Z]$/.test(event.code)) key = event.code.slice(3);
+    else if (/^Digit\d$/.test(event.code)) key = event.code.slice(5);
+    else if (punctuation[event.code]) key = punctuation[event.code];
+    else if (key.length === 1 && /[a-z]/i.test(key)) key = key.toUpperCase();
+    else if (key === ' ') key = 'Space';
+    return [...modifiers, key].join('+');
+  }
+  const shortcutMatches = (id, event) => eventBinding(event) === shortcutValue(id);
+  const shortcutLabel = value => String(value || '').replace('Shift+/', '?').replace('Mod', '⌘/Ctrl').replace(/Arrow/g, '');
+
   let journalDocuments = new Map();
   let graphHistory = [];
   let graphHistoryIndex = -1;
@@ -62,6 +119,8 @@
   let vimInsertSnapshot = null;
   const vimUndoStack = [];
   const vimRedoStack = [];
+  const taskUndoStack = [];
+  const taskRedoStack = [];
   const WELCOME_VERSION = '11';
 
   const starter = `# Welcome to markd
@@ -482,7 +541,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       if (firstText) {
         rendered = rendered.replace(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)\b/, status => {
           const taskState = /^(DONE|CANCELED|CANCELLED)$/.test(status) ? 'done' : /^(DOING|NOW)$/.test(status) ? 'doing' : 'todo';
-          return `<button class="graph-task graph-task-${taskState}" data-task-block="${escapeHtml(block.id)}" aria-label="Task status: ${status}" title="${status}"><span aria-hidden="true"></span></button>`;
+          return `<button class="graph-task graph-task-${taskState}" data-task-block="${escapeHtml(block.id)}" aria-label="Task status: ${status}. Click to complete; Shift-click or hold to mark in progress" title="${status} · click to complete · Shift-click or hold for DOING"><span aria-hidden="true"></span></button>`;
         });
         firstText = false;
       }
@@ -664,7 +723,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const today = taskDate();
     return items.length ? items.map(task => {
       const overdue = !task.done && task.scheduled && task.scheduled < today;
-      return `<button type="button" class="task-dashboard-item" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span class="task-dashboard-state task-dashboard-state-${task.done ? 'done' : task.progress ? 'doing' : 'todo'}" aria-hidden="true"></span><span>${overdue ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ''}${escapeHtml(task.text || 'Untitled task')}</span>${task.scheduled ? `<time class="graph-scheduled" data-scheduled-page="${escapeHtml(task.page.path)}" data-scheduled-block="${escapeHtml(task.block.id)}" data-scheduled-date="${escapeHtml(task.scheduled)}" title="Edit scheduled date"><span class="graph-scheduled-icon" aria-hidden="true"></span>${escapeHtml(task.scheduled)}</time>` : ''}</button>`;
+      return `<div class="task-dashboard-item"><button type="button" class="task-dashboard-state task-dashboard-state-${task.done ? 'done' : task.progress ? 'doing' : 'todo'}" data-task-checkbox-page="${escapeHtml(task.page.path)}" data-task-checkbox-block="${escapeHtml(task.block.id)}" aria-label="Task status: ${escapeHtml(task.marker)}. Click to complete; Shift-click or hold to mark in progress" title="${escapeHtml(task.marker)} · click to complete · Shift-click or hold for DOING"></button><button type="button" class="task-dashboard-item-main" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span>${overdue ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ''}${escapeHtml(task.text || 'Untitled task')}</span>${task.scheduled ? `<time class="graph-scheduled" data-scheduled-page="${escapeHtml(task.page.path)}" data-scheduled-block="${escapeHtml(task.block.id)}" data-scheduled-date="${escapeHtml(task.scheduled)}" title="Edit scheduled date"><span class="graph-scheduled-icon" aria-hidden="true"></span>${escapeHtml(task.scheduled)}</time>` : ''}</button></div>`;
     }).join('') : '<p class="task-dashboard-empty">No tasks</p>';
   }
 
@@ -1221,6 +1280,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       saveState.textContent = 'Opening graph…';
       closeRemoteEvents?.(); closeRemoteEvents = null;
       graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open(); graphSettings = null;
+      taskUndoStack.length = 0; taskRedoStack.length = 0;
       await loadGraphSettings();
       const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
       journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding();
@@ -1304,6 +1364,46 @@ Open, save, export, and reach recent documents or headings from the command pale
     target.setDate(Math.min(day, lastDay)); focusCalendarDate(target);
   }
 
+  function showTaskUpdateFeedback(control, marker) {
+    const row = control?.closest('.task-dashboard-item'); if (!row) return null;
+    const state = marker === 'DONE' ? 'done' : marker === 'DOING' ? 'doing' : 'todo';
+    control.classList.remove('task-dashboard-state-todo', 'task-dashboard-state-doing', 'task-dashboard-state-done');
+    control.classList.add(`task-dashboard-state-${state}`); control.setAttribute('aria-label', `Task status: ${marker}`);
+    row.classList.add('task-dashboard-item-updating');
+    const feedback = document.createElement('span'); feedback.className = `task-update-feedback task-update-feedback-${state}`;
+    feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite');
+    feedback.textContent = marker === 'DONE' ? 'Completed' : marker === 'DOING' ? 'In progress' : 'To do';
+    row.append(feedback); row.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    return Date.now();
+  }
+
+  function taskUpdateFailed(error) { renderGraphPage(); toast(error.message || 'Could not update the task'); }
+
+  async function updateTaskFromClick(pagePath, blockId, action = 'complete', options = {}) {
+    const page = graphStore?.pages.find(item => item.path === pagePath); if (!page) return;
+    const current = page.path === state.graphPage?.path;
+    const document = current ? state.graphDocument : (journalDocuments.get(page.path) || graphIndex?.documents.get(page.path) || MarkdGraph.parseDocument(page.content));
+    const block = graphBlockLocation(blockId, document?.blocks)?.block; if (!block) return;
+    const marker = block.content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/)?.[1];
+    if (!marker) return;
+    const originalContent = block.content;
+    const inProgress = /^(DOING|NOW)$/.test(marker); const completed = /^(DONE|CANCELED|CANCELLED)$/.test(marker);
+    const next = action === 'doing' ? (inProgress ? 'TODO' : 'DOING') : (completed ? 'TODO' : 'DONE');
+    block.content = block.content.replace(/^[A-Z]+/, next);
+    const feedbackStarted = showTaskUpdateFeedback(options.feedbackElement, next);
+    if (current) graphChanged();
+    else {
+      const content = MarkdGraph.serializeDocument(document);
+      try {
+        await graphStore.writePage(page, content); graphIndex.updatePage(page, content);
+        if (page.journal || journalDocuments.has(page.path)) journalDocuments.set(page.path, document);
+      } catch (error) { block.content = originalContent; throw error; }
+    }
+    recordTaskHistory(page.path, block.id, marker, next, MarkdGraph.flattenBlocks(document.blocks).findIndex(item => item.block === block));
+    if (feedbackStarted) await new Promise(resolve => setTimeout(resolve, Math.max(0, 550 - (Date.now() - feedbackStarted))));
+    renderGraphPage();
+  }
+
   async function updateScheduledDate(pagePath, blockId, date) {
     const page = graphStore?.pages.find(item => item.path === pagePath); if (!page) return;
     const current = page.path === state.graphPage?.path;
@@ -1347,7 +1447,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   async function closeGraph() {
     if (state.dirty && !(await flushGraphSave(true))) return;
     closeRemoteEvents?.(); closeRemoteEvents = null; graphStore?.disposeAssets();
-    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; state.taskView = null; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1;
+    state.graphMode = false; state.graphPage = null; state.graphDocument = null; state.graphZoomId = null; state.journalMode = false; state.taskView = null; journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; taskUndoStack.length = 0; taskRedoStack.length = 0;
     outliner.hidden = true; app.classList.remove('graph-mode', 'journal-mode', 'task-view');
     const docs = getStoredDocs();
     if (docs.length) loadMarkdown(docs[0].markdown, docs[0].name, { id: docs[0].id });
@@ -1525,10 +1625,16 @@ Open, save, export, and reach recent documents or headings from the command pale
     graphMutationFocus(block); return true;
   }
 
+  function cycledTaskContent(content) {
+    const match = content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/);
+    return !match ? `TODO ${content}` : /^(TODO|LATER|WAITING)$/.test(match[1]) ? content.replace(/^[A-Z]+/, 'DOING') : /^(DOING|NOW)$/.test(match[1]) ? content.replace(/^[A-Z]+/, 'DONE') : content.replace(/^[A-Z]+/, 'TODO');
+  }
+
   function toggleGraphTask(block, focus = true) {
-    const match = block.content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/);
-    const next = !match ? `TODO ${block.content}` : /^(TODO|LATER|WAITING)$/.test(match[1]) ? block.content.replace(/^[A-Z]+/, 'DOING') : /^(DOING|NOW)$/.test(match[1]) ? block.content.replace(/^[A-Z]+/, 'DONE') : block.content.replace(/^[A-Z]+/, 'TODO');
-    block.content = next;
+    const before = block.content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/)?.[1];
+    block.content = cycledTaskContent(block.content);
+    const after = block.content.match(/^(TODO|DOING|DONE)(?:\s+|$)/)?.[1];
+    if (before && after) recordTaskHistory(state.graphPage?.path, block.id, before, after, MarkdGraph.flattenBlocks(state.graphDocument?.blocks).findIndex(item => item.block === block));
     if (focus) graphMutationFocus(block, block.content.length); else { graphChanged(); renderGraphPage(); }
   }
 
@@ -1554,10 +1660,16 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
       event.preventDefault(); handleGraphAutocompleteKey(event.key); return;
     }
-    if (event.key === 'Tab') { event.preventDefault(); indentGraphBlock(block, event.shiftKey); return; }
-    if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); moveGraphBlock(block, event.key === 'ArrowUp' ? -1 : 1); return; }
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); toggleGraphTask(block); return; }
-    if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+    if (shortcutMatches('blockIndent', event)) { event.preventDefault(); indentGraphBlock(block, false); return; }
+    if (shortcutMatches('blockOutdent', event)) { event.preventDefault(); indentGraphBlock(block, true); return; }
+    if (shortcutMatches('blockUp', event)) { event.preventDefault(); moveGraphBlock(block, -1); return; }
+    if (shortcutMatches('blockDown', event)) { event.preventDefault(); moveGraphBlock(block, 1); return; }
+    if (shortcutMatches('taskCycle', event)) { event.preventDefault(); toggleGraphTask(block); return; }
+    if (shortcutMatches('blockLine', event)) {
+      if (event.key !== 'Enter') { event.preventDefault(); field.setRangeText('\n', field.selectionStart, field.selectionEnd, 'end'); field.dispatchEvent(new Event('input', { bubbles: true })); }
+      return;
+    }
+    if (shortcutMatches('blockNew', event)) {
       const start = field.selectionStart, end = field.selectionEnd;
       // A fenced code block belongs to one outliner block: Enter must insert a
       // literal newline instead of creating the next graph block.
@@ -1567,7 +1679,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       block.content = field.value.slice(0, start);
       createNextGraphBlock(block, field.value.slice(end)); return;
     }
-    if (event.key === 'Backspace' && !field.value && visibleGraphBlocks().length > 1) {
+    if (shortcutMatches('blockDelete', event) && !field.value && visibleGraphBlocks().length > 1) {
       event.preventDefault(); const visible = visibleGraphBlocks(); const position = visible.indexOf(block); const previous = visible[position - 1] || visible[position + 1];
       location.blocks.splice(location.index, 1, ...(block.children || [])); graphChanged(); if (previous) focusGraphBlock(previous.id); else renderGraphPage(); return;
     }
@@ -1575,7 +1687,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const visible = visibleGraphBlocks(); const index = visible.indexOf(block); const target = visible[index + (event.key === 'ArrowUp' ? -1 : 1)];
       if (target) { event.preventDefault(); focusGraphBlock(target.id, event.key === 'ArrowUp' ? target.content.length : 0); }
     }
-    if (event.key === 'Escape') { event.preventDefault(); commitGraphBlock(); }
+    if (shortcutMatches('blockEscape', event)) { event.preventDefault(); commitGraphBlock(); }
   }
 
   let autocompleteItems = []; let autocompleteIndex = 0;
@@ -1802,7 +1914,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       blockIndex: field === activeSourceBlock ? [...editor.children].indexOf(field) : 0,
       blockId: field === activeGraphBlock?.field ? activeGraphBlock.block.id : null,
       graphBlockIndex: field === activeGraphBlock?.field ? MarkdGraph.flattenBlocks(state.graphDocument?.blocks).findIndex(({ block }) => block === activeGraphBlock.block) : 0,
-      cursor: field?.selectionStart || 0
+      cursor: field?.selectionStart || 0,
+      timestamp: Date.now()
     };
   }
 
@@ -1860,6 +1973,44 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!snapshot) { toast(redo ? 'Nothing to redo' : 'Nothing to undo'); return; }
     pushVimSnapshot(destination, captureVimSnapshot());
     restoreVimSnapshot(snapshot);
+  }
+
+  function recordTaskHistory(pagePath, blockId, before, after, blockIndex = -1) {
+    taskUndoStack.push({ graph: graphStore?.name || '', pagePath, blockId, blockIndex, before, after, timestamp: Date.now() });
+    if (taskUndoStack.length > 100) taskUndoStack.shift();
+    taskRedoStack.length = 0;
+  }
+
+  async function applyTaskHistory(redo = false) {
+    const source = redo ? taskRedoStack : taskUndoStack; const destination = redo ? taskUndoStack : taskRedoStack;
+    const operation = source.pop(); if (!operation) return false;
+    try {
+      if (operation.graph !== (graphStore?.name || '')) throw new Error('The task belongs to another graph');
+      const page = graphStore?.pages.find(item => item.path === operation.pagePath); if (!page) throw new Error('Task page not found');
+      const current = page.path === state.graphPage?.path;
+      const document = current ? state.graphDocument : (journalDocuments.get(page.path) || graphIndex?.documents.get(page.path) || MarkdGraph.parseDocument(page.content));
+      const block = graphBlockLocation(operation.blockId, document?.blocks)?.block || MarkdGraph.flattenBlocks(document?.blocks)[operation.blockIndex]?.block;
+      if (!block) throw new Error('Task block not found');
+      const marker = block.content.match(/^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/)?.[1];
+      if (!marker) throw new Error('The block is no longer a task');
+      const target = redo ? operation.after : operation.before; block.content = block.content.replace(/^[A-Z]+/, target);
+      if (current) graphChanged();
+      else {
+        const content = MarkdGraph.serializeDocument(document);
+        try { await graphStore.writePage(page, content); graphIndex.updatePage(page, content); }
+        catch (error) { block.content = block.content.replace(/^[A-Z]+/, marker); throw error; }
+        if (page.journal || journalDocuments.has(page.path)) journalDocuments.set(page.path, document);
+      }
+      destination.push({ ...operation, timestamp: Date.now() }); renderGraphPage();
+      toast(`Task state ${redo ? 'redone' : 'undone'}: ${target}`); return true;
+    } catch (error) { source.push(operation); toast(error.message || `Could not ${redo ? 'redo' : 'undo'} task state`); return true; }
+  }
+
+  function applyAppHistory(redo = false) {
+    const taskStack = redo ? taskRedoStack : taskUndoStack; const vimStack = redo ? vimRedoStack : vimUndoStack;
+    const taskTime = taskStack.at(-1)?.timestamp || 0; const vimTime = vimStack.at(-1)?.timestamp || 0;
+    if (taskTime > vimTime) { applyTaskHistory(redo); return; }
+    applyVimHistory(redo);
   }
 
   function vimLineBounds(field, position = field.selectionStart) {
@@ -2147,8 +2298,8 @@ Open, save, export, and reach recent documents or headings from the command pale
 
     if (key === 'Ctrl+d') { moveVimByPage(field, 1); return; }
     if (key === 'Ctrl+u') { moveVimByPage(field, -1); return; }
-    if (key === 'u') { applyVimHistory(false); return; }
-    if (key === 'Ctrl+r') { applyVimHistory(true); return; }
+    if (key === 'u') { applyAppHistory(false); return; }
+    if (key === 'Ctrl+r') { applyAppHistory(true); return; }
 
     if (key !== 'j' && key !== 'k' && key !== 'ArrowDown' && key !== 'ArrowUp') vimDesiredColumn = null;
     if (key === 'h' || key === 'ArrowLeft') finish(Math.max(bounds.start, position - 1));
@@ -2229,13 +2380,14 @@ Open, save, export, and reach recent documents or headings from the command pale
   function handleSourceBlockKeydown(event) {
     if (handleSelectionDelimiter(event) || handleWikiPair(event)) return;
     const source = event.currentTarget; const start = source.selectionStart; const end = source.selectionEnd;
-    if (event.key === 'Escape') {
+    if (shortcutMatches('blockEscape', event)) {
       event.preventDefault(); event.stopPropagation(); commitActiveBlock(); editor.focus(); return;
     }
-    if ((event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) ||
-        (event.key === 'ArrowUp' && start === 0 && end === 0) ||
+    const moveUp = shortcutMatches('blockUp', event); const moveDown = shortcutMatches('blockDown', event);
+    if (moveUp || moveDown || (event.key === 'ArrowUp' && start === 0 && end === 0) ||
         (event.key === 'ArrowDown' && start === source.value.length && end === source.value.length)) {
-      event.preventDefault(); event.stopPropagation(); moveToAdjacentBlock(event.key === 'ArrowUp' ? -1 : 1, event.key === 'ArrowDown'); return;
+      const direction = moveUp || event.key === 'ArrowUp' ? -1 : 1;
+      event.preventDefault(); event.stopPropagation(); moveToAdjacentBlock(direction, direction > 0); return;
     }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault(); event.stopPropagation(); moveToAdjacentBlock(1, true); return;
@@ -2593,33 +2745,48 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   let documentationLoaded = false;
   let documentationReturnFocus = null;
-  async function showDocumentation() {
-    documentationReturnFocus = activeMarkdownField() || document.activeElement;
-    documentationView.hidden = false; app.classList.add('documentation-open');
-    if (!documentationLoaded) {
-      documentationContent.innerHTML = '<p>Loading documentation…</p>';
-      try {
-        const response = await fetch('./DOCUMENTATION.md');
-        if (!response.ok) throw new Error('Documentation is unavailable');
-        documentationContent.innerHTML = markdownToHtml(await response.text());
-        const used = new Set();
-        $$('h1,h2,h3,h4,h5,h6', documentationContent).forEach((heading, index) => {
-          let id = heading.textContent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `section-${index}`;
-          while (used.has(id)) id = `${id}-${index}`; used.add(id); heading.id = id;
-        });
-        documentationLoaded = true;
-      } catch (error) {
-        documentationContent.innerHTML = `<p>${escapeHtml(error.message || 'Could not load the documentation.')}</p>`;
-      }
-    }
-    if (!documentationView.hidden) requestAnimationFrame(() => $('#documentationClose').focus());
+  async function loadDocumentation() {
+    if (documentationLoaded) return;
+    documentationContent.innerHTML = '<p>Loading documentation…</p>';
+    try {
+      const response = await fetch('./DOCUMENTATION.md');
+      if (!response.ok) throw new Error('Documentation is unavailable');
+      documentationContent.innerHTML = markdownToHtml(await response.text());
+      const used = new Set();
+      $$('h1,h2,h3,h4,h5,h6', documentationContent).forEach((heading, index) => {
+        let id = heading.textContent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `section-${index}`;
+        while (used.has(id)) id = `${id}-${index}`; used.add(id); heading.id = id;
+      });
+      documentationLoaded = true;
+    } catch (error) { documentationContent.innerHTML = `<p>${escapeHtml(error.message || 'Could not load the documentation.')}</p>`; }
   }
+
+  function renderShortcutSettings(query = '') {
+    const value = query.trim().toLowerCase(); const groups = new Map();
+    for (const item of shortcutDefinitions) {
+      if (value && !`${item.label} ${item.section} ${shortcutValue(item.id)}`.toLowerCase().includes(value)) continue;
+      if (!groups.has(item.section)) groups.set(item.section, []); groups.get(item.section).push(item);
+    }
+    $('#shortcutList').innerHTML = [...groups].map(([section, items]) => `<section class="shortcut-section"><h2>${escapeHtml(section)}</h2>${items.map(item => `<div class="shortcut-row"><span>${escapeHtml(item.label)}</span><button type="button" class="shortcut-binding" data-shortcut-record="${item.id}">${escapeHtml(shortcutLabel(shortcutValue(item.id)))}</button><button type="button" class="shortcut-reset" data-shortcut-reset="${item.id}" aria-label="Reset ${escapeHtml(item.label)}">Reset</button></div>`).join('')}</section>`).join('') || '<p class="task-dashboard-empty">No shortcuts found</p>';
+  }
+
+  async function showSettings(tab = 'general') {
+    if (documentationView.hidden) documentationReturnFocus = activeMarkdownField() || document.activeElement;
+    documentationView.hidden = false; app.classList.add('documentation-open');
+    $$('[data-settings-tab]').forEach(button => button.classList.toggle('active', button.dataset.settingsTab === tab));
+    $$('[data-settings-panel]').forEach(panel => { panel.hidden = panel.dataset.settingsPanel !== tab; });
+    $('#settingsTheme').value = selectedTheme; $('#settingsAccent').value = selectedAccent; $('#settingsVim').checked = state.vimEnabled;
+    if (tab === 'shortcuts') renderShortcutSettings($('#shortcutSearch').value);
+    if (tab === 'documentation') await loadDocumentation();
+    requestAnimationFrame(() => (tab === 'shortcuts' ? $('#shortcutSearch') : $('#settingsClose')).focus());
+  }
+  const showDocumentation = () => showSettings('documentation');
 
   function closeDocumentation() {
     if (documentationView.hidden) return;
     documentationView.hidden = true; app.classList.remove('documentation-open');
     if (documentationReturnFocus?.isConnected) documentationReturnFocus.focus();
-    else $('#commandButton').focus();
+    else $('#settingsButton').focus();
   }
 
   function exportHtml() {
@@ -2725,35 +2892,36 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   const commands = [
-    { label: 'Documentation', shortcut: '?', keywords: 'help guide manual shortcuts', run: showDocumentation },
+    { label: 'Settings', shortcutId: 'settings', keywords: 'preferences general shortcuts appearance', run: () => showSettings('general') },
+    { label: 'Documentation', shortcutId: 'documentation', keywords: 'help guide manual shortcuts', run: showDocumentation },
     { label: 'Open local graph', keywords: 'folder logseq graph local', run: () => requestAction(openGraph) },
     { label: 'Sync all notes and backlinks', keywords: 'graph index refresh rescan autocomplete block references', run: () => requestAction(syncGraphIndex) },
     { label: 'Clean orphaned assets', keywords: 'attachments files upload unused cleanup delete assets', run: () => requestAction(cleanOrphanedAssets) },
     { label: 'New graph page', keywords: 'page create graph', run: () => requestAction(createGraphPage) },
-    { label: 'Today journal', shortcut: '⇧⌘ J', keywords: 'daily notes journal today', aliases: '/today', run: () => requestAction(openToday) },
-    { label: 'Previous page', shortcut: 'Alt ←', keywords: 'history back navigate', run: () => navigateGraphHistory(-1) },
-    { label: 'Next page', shortcut: 'Alt →', keywords: 'history forward navigate', run: () => navigateGraphHistory(1) },
+    { label: 'Today journal', shortcutId: 'today', keywords: 'daily notes journal today', aliases: '/today', run: () => requestAction(openToday) },
+    { label: 'Previous page', shortcutId: 'back', keywords: 'history back navigate', run: () => navigateGraphHistory(-1) },
+    { label: 'Next page', shortcutId: 'forward', keywords: 'history forward navigate', run: () => navigateGraphHistory(1) },
     { label: 'Copy block reference', keywords: 'uuid block reference link', run: copyGraphBlockReference },
     { label: 'Zoom into block', keywords: 'focus block outliner', run: zoomGraphBlock },
     { label: 'Close graph', keywords: 'close folder graph', run: closeGraph },
-    { label: 'Rename document', shortcut: 'F2', keywords: 'title name file page', run: () => { commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); } },
-    { label: 'Find in document', shortcut: '⌘ F', keywords: 'search', run: showFind },
-    { label: 'Full Markdown source', shortcut: '⌘ /', keywords: 'source code', run: () => toggleSource() },
+    { label: 'Rename document', shortcutId: 'rename', keywords: 'title name file page', run: () => { commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); } },
+    { label: 'Find in document', shortcutId: 'find', keywords: 'search', run: showFind },
+    { label: 'Full Markdown source', shortcutId: 'source', keywords: 'source code', run: () => toggleSource() },
     { label: 'Toggle Vim mode', keywords: 'vim keyboard normal insert', run: () => setVimEnabled() },
     { label: 'Normal text', keywords: 'paragraph', run: () => transformMarkdownBlock(text => text.replace(/^#{1,6}\s+/, '').replace(/^>\s+/gm, '')) },
-    { label: 'Heading 1', shortcut: '⌘ 1', keywords: 'heading h1', run: () => headingCommand(1) },
-    { label: 'Heading 2', shortcut: '⌘ 2', keywords: 'heading h2', run: () => headingCommand(2) },
-    { label: 'Heading 3', shortcut: '⌘ 3', keywords: 'heading h3', run: () => headingCommand(3) },
-    { label: 'Bold', shortcut: '⌘ B', keywords: 'bold', run: () => wrapMarkdownSelection('**') },
-    { label: 'Italic', shortcut: '⌘ I', keywords: 'italic', run: () => wrapMarkdownSelection('*') },
-    { label: 'Inline code', shortcut: '⌘ `', keywords: 'code', run: () => wrapMarkdownSelection('`') },
+    { label: 'Heading 1', shortcutId: 'heading1', keywords: 'heading h1', run: () => headingCommand(1) },
+    { label: 'Heading 2', shortcutId: 'heading2', keywords: 'heading h2', run: () => headingCommand(2) },
+    { label: 'Heading 3', shortcutId: 'heading3', keywords: 'heading h3', run: () => headingCommand(3) },
+    { label: 'Bold', shortcutId: 'bold', keywords: 'bold', run: () => wrapMarkdownSelection('**') },
+    { label: 'Italic', shortcutId: 'italic', keywords: 'italic', run: () => wrapMarkdownSelection('*') },
+    { label: 'Inline code', shortcutId: 'code', keywords: 'code', run: () => wrapMarkdownSelection('`') },
     { label: 'Strikethrough', keywords: 'strike', run: () => wrapMarkdownSelection('~~') },
     { label: 'Page reference', keywords: 'page wiki brackets reference', run: () => wrapMarkdownSelection('[[', ']]', 'page') },
     { label: 'Block reference', keywords: 'block parentheses reference', run: () => wrapMarkdownSelection('((', '))', 'block id') },
     { label: 'Link', keywords: 'link url', run: () => wrapMarkdownSelection('[', '](https://)', 'text') },
     { label: 'Image', keywords: 'photo image url', run: () => wrapMarkdownSelection('![', '](https://)', 'description') },
-    { label: 'Bulleted list', shortcut: '⇧⌘ 8', keywords: 'list bullet', run: () => prefixMarkdownLines('- ') },
-    { label: 'Numbered list', shortcut: '⇧⌘ 7', keywords: 'list ordered', run: () => prefixMarkdownLines('', true) },
+    { label: 'Bulleted list', shortcutId: 'bulletList', keywords: 'list bullet', run: () => prefixMarkdownLines('- ') },
+    { label: 'Numbered list', shortcutId: 'orderedList', keywords: 'list ordered', run: () => prefixMarkdownLines('', true) },
     { label: 'Task', keywords: 'task checkbox', run: () => prefixMarkdownLines('- [ ] ') },
     { label: 'Quote', keywords: 'quote blockquote', run: () => prefixMarkdownLines('> ') },
     { label: 'Code block', keywords: 'code fence', run: () => transformMarkdownBlock(text => `\`\`\`\n${text}\n\`\`\``) },
@@ -2825,7 +2993,8 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function commandMarkup(command, index) {
-    return `<button class="command-item${index === selectedCommand ? ' selected' : ''}" data-command-index="${index}" role="option" aria-selected="${index === selectedCommand}"><span>${escapeHtml(command.label)}</span>${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ''}</button>`;
+    const shortcut = command.shortcutId ? shortcutLabel(shortcutValue(command.shortcutId)) : command.shortcut;
+    return `<button class="command-item${index === selectedCommand ? ' selected' : ''}" data-command-index="${index}" role="option" aria-selected="${index === selectedCommand}"><span>${escapeHtml(command.label)}</span>${shortcut ? `<kbd>${escapeHtml(shortcut)}</kbd>` : ''}</button>`;
   }
 
   function formatGraphSize(bytes) {
@@ -3002,7 +3171,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const field = activeGraphBlock?.field; const block = activeGraphBlock?.block;
     if (!button || !field || !block) return;
     const action = button.dataset.blockAction;
-    if (action === 'undo' || action === 'redo') { applyVimHistory(action === 'redo'); return; }
+    if (action === 'undo' || action === 'redo') { applyAppHistory(action === 'redo'); return; }
     const snapshot = captureVimSnapshot(field);
     if (['indent', 'outdent', 'up', 'down'].includes(action)) {
       const changed = action === 'indent' ? indentGraphBlock(block) : action === 'outdent' ? indentGraphBlock(block, true) : moveGraphBlock(block, action === 'up' ? -1 : 1);
@@ -3055,13 +3224,34 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !journalCalendar.hidden) closeJournalCalendar(); });
   $('#commandButton').addEventListener('click', () => showCommandPalette());
-  $('#documentationClose').addEventListener('click', closeDocumentation);
+  $('#settingsButton').addEventListener('click', () => showSettings('general'));
+  $('#settingsClose').addEventListener('click', closeDocumentation);
+  $('.settings-nav').addEventListener('click', event => { const tab = event.target.closest('[data-settings-tab]')?.dataset.settingsTab; if (tab) showSettings(tab); });
+  $('#settingsTheme').addEventListener('change', event => setTheme(event.target.value));
+  $('#settingsAccent').addEventListener('input', event => setAccent(event.target.value));
+  $('#settingsVim').addEventListener('change', event => setVimEnabled(event.target.checked, false));
+  $('#shortcutSearch').addEventListener('input', event => renderShortcutSettings(event.target.value));
+  $('#shortcutList').addEventListener('click', event => {
+    const reset = event.target.closest('[data-shortcut-reset]'); if (!reset) return;
+    const shortcuts = { ...(currentSettings().shortcuts || {}) }; delete shortcuts[reset.dataset.shortcutReset];
+    saveSettings({ shortcuts }); renderShortcutSettings($('#shortcutSearch').value);
+  });
+  $('#shortcutList').addEventListener('keydown', event => {
+    const button = event.target.closest('[data-shortcut-record]'); if (!button) return;
+    event.preventDefault(); event.stopPropagation();
+    if (event.key === 'Escape') { button.classList.remove('recording'); button.textContent = shortcutLabel(shortcutValue(button.dataset.shortcutRecord)); return; }
+    const binding = eventBinding(event); if (!binding) return;
+    const conflict = shortcutDefinitions.find(item => item.id !== button.dataset.shortcutRecord && shortcutValue(item.id) === binding);
+    if (conflict) return toast(`Shortcut already used by ${conflict.label}`);
+    const shortcuts = { ...(currentSettings().shortcuts || {}), [button.dataset.shortcutRecord]: binding };
+    saveSettings({ shortcuts }); button.classList.remove('recording'); renderShortcutSettings($('#shortcutSearch').value);
+  });
+  $('#shortcutList').addEventListener('focusin', event => { const button = event.target.closest('[data-shortcut-record]'); if (button) { button.classList.add('recording'); button.textContent = 'Press shortcut…'; } });
+  $('#shortcutList').addEventListener('focusout', event => { const button = event.target.closest('[data-shortcut-record]'); if (button?.isConnected) { button.classList.remove('recording'); button.textContent = shortcutLabel(shortcutValue(button.dataset.shortcutRecord)); } });
   document.addEventListener('keydown', event => {
-    const key = event.key.toLowerCase();
-    const redo = key === 'y' || (key === 'z' && event.shiftKey);
-    if (state.vimEnabled || !(event.metaKey || event.ctrlKey) || (key !== 'z' && key !== 'y')) return;
-    event.preventDefault();
-    applyVimHistory(redo);
+    const redo = shortcutMatches('redo', event) || shortcutMatches('redoAlt', event);
+    if (state.vimEnabled || (!redo && !shortcutMatches('undo', event))) return;
+    event.preventDefault(); applyAppHistory(redo);
   }, true);
   document.addEventListener('keydown', handleVimKeydown, true);
   document.addEventListener('pointerup', event => {
@@ -3184,18 +3374,45 @@ Open, save, export, and reach recent documents or headings from the command pale
   editor.addEventListener('click', event => {
     if (event.target.matches('input[type="checkbox"]')) { event.target.toggleAttribute('checked', event.target.checked); changed(); }
   });
+  let taskLongPressTimer = null; let taskLongPressStart = null; let suppressTaskClickUntil = 0;
+  const taskControlInfo = control => control?.matches('[data-task-checkbox-page]')
+    ? { pagePath: control.dataset.taskCheckboxPage, blockId: control.dataset.taskCheckboxBlock }
+    : control?.matches('[data-task-block]')
+      ? { pagePath: control.closest('.block-node, .on-this-day-item')?.dataset.pagePath || state.graphPage?.path, blockId: control.dataset.taskBlock }
+      : null;
+  const cancelTaskLongPress = () => { clearTimeout(taskLongPressTimer); taskLongPressTimer = null; taskLongPressStart = null; };
+  outliner.addEventListener('pointerdown', event => {
+    const control = event.target.closest('[data-task-checkbox-page], [data-task-block]');
+    if (!control || event.button !== 0) return;
+    if (event.shiftKey) { control.dataset.taskShiftClick = 'true'; setTimeout(() => { if (control.isConnected) delete control.dataset.taskShiftClick; }, 1000); return; }
+    taskLongPressStart = { x: event.clientX, y: event.clientY };
+    taskLongPressTimer = setTimeout(() => {
+      const info = taskControlInfo(control); if (!info) return;
+      suppressTaskClickUntil = Date.now() + 800; navigator.vibrate?.(20);
+      updateTaskFromClick(info.pagePath, info.blockId, 'doing', { feedbackElement: control.matches('[data-task-checkbox-page]') ? control : null }).catch(taskUpdateFailed);
+      taskLongPressTimer = null; taskLongPressStart = null;
+    }, 550);
+  });
+  outliner.addEventListener('pointermove', event => {
+    if (taskLongPressStart && Math.hypot(event.clientX - taskLongPressStart.x, event.clientY - taskLongPressStart.y) > 10) cancelTaskLongPress();
+  });
+  outliner.addEventListener('pointerup', cancelTaskLongPress);
+  outliner.addEventListener('pointercancel', cancelTaskLongPress);
+  outliner.addEventListener('contextmenu', event => { if (event.target.closest('[data-task-checkbox-page], [data-task-block]')) event.preventDefault(); });
   outliner.addEventListener('pointerdown', event => {
     if (!event.metaKey && !event.ctrlKey && !event.shiftKey) return;
+    if (event.target.closest('[data-task-checkbox-page], [data-task-block]')) return;
     const node = event.target.closest('.block-node');
     if (node?.dataset.pagePath === state.graphPage?.path && event.target.closest('.block-row')) event.preventDefault();
   });
   outliner.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && selectedGraphBlockIds.size) { event.preventDefault(); clearGraphBlockSelection(); return; }
-    if (event.key === 'Backspace' && selectedGraphBlockIds.size) { event.preventDefault(); deleteSelectedGraphBlocks(); }
+    if (shortcutMatches('blockEscape', event) && selectedGraphBlockIds.size) { event.preventDefault(); clearGraphBlockSelection(); return; }
+    if (shortcutMatches('blockDelete', event) && selectedGraphBlockIds.size) { event.preventDefault(); deleteSelectedGraphBlocks(); }
   });
   outliner.addEventListener('click', async event => {
+    const taskControl = event.target.closest('[data-task-checkbox-page], [data-task-block]');
     const selectionNode = event.target.closest('.block-node');
-    if (selectionNode && event.target.closest('.block-row') && (event.metaKey || event.ctrlKey || event.shiftKey) && selectGraphBlocksWithMouse(selectionNode, event)) {
+    if (!taskControl && selectionNode && event.target.closest('.block-row') && (event.metaKey || event.ctrlKey || event.shiftKey) && selectGraphBlocksWithMouse(selectionNode, event)) {
       event.preventDefault(); return;
     }
     if (selectedGraphBlockIds.size && !event.metaKey && !event.ctrlKey && !event.shiftKey) clearGraphBlockSelection();
@@ -3223,6 +3440,13 @@ Open, save, export, and reach recent documents or headings from the command pale
       else { state.taskView = taskFilter.dataset.taskFilter; renderGraphPage(); }
       return;
     }
+    const taskCheckbox = event.target.closest('[data-task-checkbox-page]');
+    if (taskCheckbox) {
+      if (Date.now() < suppressTaskClickUntil) return;
+      const action = event.shiftKey || taskCheckbox.dataset.taskShiftClick === 'true' ? 'doing' : 'complete'; delete taskCheckbox.dataset.taskShiftClick;
+      await updateTaskFromClick(taskCheckbox.dataset.taskCheckboxPage, taskCheckbox.dataset.taskCheckboxBlock, action, { feedbackElement: taskCheckbox }).catch(taskUpdateFailed);
+      return;
+    }
     const taskSource = event.target.closest('[data-task-page]');
     if (taskSource) {
       const page = graphStore?.pages.find(item => item.path === taskSource.dataset.taskPage);
@@ -3246,8 +3470,9 @@ Open, save, export, and reach recent documents or headings from the command pale
     const blockNode = event.target.closest('.block-node, .on-this-day-item'); const pagePath = blockNode?.dataset.pagePath;
     const task = event.target.closest('[data-task-block]');
     if (task) {
-      if (state.journalMode && pagePath && pagePath !== state.graphPage.path) activateJournalBlock(pagePath, task.dataset.taskBlock, 'task');
-      else { const block = graphBlockLocation(task.dataset.taskBlock)?.block; if (block) toggleGraphTask(block, false); }
+      if (Date.now() < suppressTaskClickUntil) return;
+      const action = event.shiftKey || task.dataset.taskShiftClick === 'true' ? 'doing' : 'complete'; delete task.dataset.taskShiftClick;
+      await updateTaskFromClick(pagePath || state.graphPage?.path, task.dataset.taskBlock, action).catch(taskUpdateFailed);
       return;
     }
     const assetLink = event.target.closest('a[data-graph-asset]');
@@ -3301,6 +3526,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   const systemColorScheme = matchMedia('(prefers-color-scheme: dark)');
   let selectedTheme = 'system';
+  let selectedAccent = '#3f7fba';
   function applyTheme() {
     const effectiveTheme = selectedTheme === 'system' ? (systemColorScheme.matches ? 'dark' : 'light') : selectedTheme;
     app.classList.toggle('theme-dark', effectiveTheme === 'dark');
@@ -3311,6 +3537,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     selectedTheme = ['light', 'dark', 'system'].includes(theme) ? theme : 'system';
     applyTheme();
     if (persist) saveSettings({ theme: selectedTheme });
+  }
+  function setAccent(color, persist = true) {
+    selectedAccent = /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#3f7fba';
+    document.documentElement.style.setProperty('--accent', selectedAccent);
+    if (persist) saveSettings({ accentColor: selectedAccent });
   }
   if (systemColorScheme.addEventListener) systemColorScheme.addEventListener('change', () => { if (selectedTheme === 'system') applyTheme(); });
   else systemColorScheme.addListener(() => { if (selectedTheme === 'system') applyTheme(); });
@@ -3337,7 +3568,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const local = localSettings();
       graphSettings = {
         schemaVersion: 1,
-        ...Object.fromEntries(['theme', 'vimEnabled', 'graphCollapsed', 'lastGraphPage', 'recentGraphPages'].filter(key => key in local).map(key => [key, local[key]])),
+        ...Object.fromEntries(['theme', 'accentColor', 'vimEnabled', 'shortcuts', 'graphCollapsed', 'lastGraphPage', 'recentGraphPages'].filter(key => key in local).map(key => [key, local[key]])),
         journal: importedJournal
       };
       migrated = true;
@@ -3345,6 +3576,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     graphStore.applySettings(graphSettings);
     if (migrated) await graphStore.writeSettings(graphSettings);
     setTheme(graphSettings.theme || 'system', false);
+    setAccent(graphSettings.accentColor || '#3f7fba', false);
     setVimEnabled(Boolean(graphSettings.vimEnabled), false, false);
   }
 
@@ -3359,28 +3591,24 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
 
   document.addEventListener('keydown', event => {
-    const mod = event.metaKey || event.ctrlKey; const key = event.key.toLowerCase();
     if (!documentationView.hidden) { if (event.key === 'Escape') { event.preventDefault(); closeDocumentation(); } return; }
-    if (event.key === '?' && !mod && !event.altKey && !event.target.matches?.('input,textarea,[contenteditable="true"]')) { event.preventDefault(); showDocumentation(); return; }
-    if (state.graphMode && mod && event.shiftKey && key === 'j') { event.preventDefault(); requestAction(openToday); return; }
-    if (state.graphMode && event.altKey && !mod && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
-      event.preventDefault(); navigateGraphHistory(event.key === 'ArrowLeft' ? -1 : 1); return;
-    }
-    if (event.key === 'F2') { event.preventDefault(); commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); return; }
-    if (event.key === 'F1' || (mod && key === 'k') || (mod && event.shiftKey && key === 'p')) { event.preventDefault(); showCommandPalette(); return; }
+    const plainTarget = !event.target.matches?.('input,textarea,[contenteditable="true"]');
+    if (shortcutMatches('settings', event)) { event.preventDefault(); showSettings('general'); return; }
+    if ((plainTarget || /^(?:Mod|Alt)\+/.test(shortcutValue('documentation'))) && shortcutMatches('documentation', event)) { event.preventDefault(); showDocumentation(); return; }
+    if (['commands', 'commandsF1', 'commandsSearch'].some(id => shortcutMatches(id, event))) { event.preventDefault(); showCommandPalette(); return; }
     if (!$('#commandPalette').hidden) return;
-    if (mod && event.shiftKey && key === 'e') { event.preventDefault(); exportHtml(); return; }
-    if (mod && event.shiftKey && event.code === 'Digit7') { event.preventDefault(); prefixMarkdownLines('', true); return; }
-    if (mod && event.shiftKey && event.code === 'Digit8') { event.preventDefault(); prefixMarkdownLines('- '); return; }
-    if (mod && ['1', '2', '3'].includes(event.key)) { event.preventDefault(); headingCommand(Number(event.key)); return; }
-    if (mod && key === 's') { event.preventDefault(); saveFile(); return; }
-    if (mod && key === 'o') { event.preventDefault(); requestAction(openFile); return; }
-    if (mod && key === 'n') { event.preventDefault(); requestAction(newDocument); return; }
-    if (mod && key === 'f') { event.preventDefault(); showFind(); return; }
-    if (mod && key === 'b') { event.preventDefault(); wrapMarkdownSelection('**'); return; }
-    if (mod && key === 'i') { event.preventDefault(); wrapMarkdownSelection('*'); return; }
-    if (mod && event.key === '`') { event.preventDefault(); wrapMarkdownSelection('`'); return; }
-    if (mod && event.key === '/') { event.preventDefault(); toggleSource(); return; }
+    if (state.graphMode && shortcutMatches('today', event)) { event.preventDefault(); requestAction(openToday); return; }
+    if (state.graphMode && shortcutMatches('back', event)) { event.preventDefault(); navigateGraphHistory(-1); return; }
+    if (state.graphMode && shortcutMatches('forward', event)) { event.preventDefault(); navigateGraphHistory(1); return; }
+    if (shortcutMatches('rename', event)) { event.preventDefault(); commitActiveBlock(); commitGraphBlock(); fileName.focus(); fileName.select(); return; }
+    const actions = [
+      ['export', exportHtml], ['orderedList', () => prefixMarkdownLines('', true)], ['bulletList', () => prefixMarkdownLines('- ')],
+      ['heading1', () => headingCommand(1)], ['heading2', () => headingCommand(2)], ['heading3', () => headingCommand(3)],
+      ['save', saveFile], ['open', () => requestAction(openFile)], ['new', () => requestAction(newDocument)], ['find', showFind],
+      ['bold', () => wrapMarkdownSelection('**')], ['italic', () => wrapMarkdownSelection('*')], ['code', () => wrapMarkdownSelection('`')], ['source', toggleSource]
+    ];
+    const action = actions.find(([id]) => shortcutMatches(id, event));
+    if (action) { event.preventDefault(); action[1](); return; }
     if (event.key === 'Escape') $('#findbar').hidden = true;
   });
 
@@ -3465,6 +3693,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   let settings = localSettings();
   const savedTheme = ['light', 'dark', 'system'].includes(settings.theme) ? settings.theme : 'system';
   setTheme(savedTheme, false);
+  setAccent(settings.accentColor || '#3f7fba', false);
   if (settings.theme !== savedTheme) saveSettings({ theme: savedTheme });
   setVimEnabled(Boolean(settings.vimEnabled), false, false);
   let docs = getStoredDocs();

@@ -1,4 +1,4 @@
-const CACHE = 'markd-editor-v33';
+const CACHE = 'markd-editor-v34';
 const ASSETS = ['./', './index.html', './styles.css', './theme-config.css', './graph.js', './app.js', './DOCUMENTATION.md', './manifest.webmanifest', './icon.svg'];
 const STATIC_PATHS = new Set(ASSETS.map(path => new URL(path, self.location.href).pathname));
 

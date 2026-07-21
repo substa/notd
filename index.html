@@ -40,6 +40,9 @@
           <div id="calendarDays" class="calendar-days"></div>
           <div id="calendarTasks" class="calendar-tasks"></div>
         </div>
+        <button class="title-action" id="settingsButton" type="button" aria-label="Open settings" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+        </button>
         <button class="command-button" id="commandButton" aria-label="Search commands and pages" aria-keyshortcuts="Control+K Meta+K" title="Search (⌘/Ctrl + K)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg>
         </button>
@@ -117,13 +120,32 @@
         </footer>
       </div>
     </div>
-    <section id="documentationView" class="documentation-view" aria-label="Documentation" hidden>
-      <header class="documentation-header">
-        <strong>markd · Documentation</strong>
-        <button id="documentationClose" type="button" aria-label="Close documentation">×</button>
+    <section id="settingsView" class="settings-view" aria-label="Settings" hidden>
+      <header class="settings-header">
+        <strong>markd · Settings</strong>
+        <button id="settingsClose" type="button" aria-label="Close settings">×</button>
       </header>
-      <div class="documentation-scroll">
-        <article id="documentationContent" class="editor documentation-content"></article>
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <button type="button" data-settings-tab="general">General</button>
+          <button type="button" data-settings-tab="shortcuts">Shortcuts</button>
+          <button type="button" data-settings-tab="documentation">Documentation</button>
+        </nav>
+        <main class="settings-main">
+          <section class="settings-panel settings-general" data-settings-panel="general">
+            <h1>General</h1>
+            <label class="settings-field"><span><strong>Theme</strong><small>Choose the interface appearance.</small></span><select id="settingsTheme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+            <label class="settings-field"><span><strong>Accent color</strong><small>Used for links, focus and active controls.</small></span><input id="settingsAccent" type="color" value="#3f7fba"></label>
+            <label class="settings-field"><span><strong>Vim mode</strong><small>Enable Normal and Insert editing modes.</small></span><input id="settingsVim" type="checkbox" role="switch"></label>
+          </section>
+          <section class="settings-panel settings-shortcuts" data-settings-panel="shortcuts" hidden>
+            <header><div><h1>Shortcuts</h1><p>Click a shortcut, then press a new key combination.</p></div><input id="shortcutSearch" type="search" placeholder="Search shortcuts…" aria-label="Search shortcuts"></header>
+            <div id="shortcutList"></div>
+          </section>
+          <section class="settings-panel settings-documentation" data-settings-panel="documentation" hidden>
+            <article id="documentationContent" class="editor documentation-content"></article>
+          </section>
+        </main>
       </div>
     </section>
     <div id="graphAutocomplete" class="graph-autocomplete" role="listbox" hidden></div>
