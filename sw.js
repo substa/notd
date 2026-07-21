@@ -1,5 +1,5 @@
-const CACHE = 'markd-editor-v34';
-const ASSETS = ['./', './index.html', './styles.css', './theme-config.css', './graph.js', './app.js', './DOCUMENTATION.md', './manifest.webmanifest', './icon.svg'];
+const CACHE = 'markd-editor-v35';
+const ASSETS = ['./', './index.html', './styles.css', './theme-config.css', './graph.js', './app.js', './DOCUMENTATION.md', './manifest.webmanifest', './favicon.ico', './favicon-16x16.png', './favicon-32x32.png', './apple-touch-icon.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 const STATIC_PATHS = new Set(ASSETS.map(path => new URL(path, self.location.href).pathname));
 
 self.addEventListener('install', event => event.waitUntil(

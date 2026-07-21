@@ -8,7 +8,12 @@
   <meta name="referrer" content="no-referrer">
   <title>markd — Markdown editor</title>
   <base href="/">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="markd">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="theme-config.css">
 </head>
@@ -79,6 +84,14 @@
         <h2 id="dialogTitle">Unsaved changes</h2>
         <p>Do you want to save this document before continuing?</p>
         <div><button data-dialog="cancel">Cancel</button><button data-dialog="discard">Don’t save</button><button class="primary" data-dialog="save">Save</button></div>
+      </div>
+    </div>
+
+    <div class="dialog-backdrop" id="deleteConfirmDialog" hidden>
+      <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="deleteDialogTitle" aria-describedby="deleteDialogMessage">
+        <h2 id="deleteDialogTitle">Delete page?</h2>
+        <p id="deleteDialogMessage"></p>
+        <div><button type="button" data-delete-dialog="cancel">Cancel</button><button type="button" class="danger" data-delete-dialog="confirm">Delete</button></div>
       </div>
     </div>
 

@@ -89,6 +89,7 @@
     return [...modifiers, key].join('+');
   }
   const shortcutMatches = (id, event) => eventBinding(event) === shortcutValue(id);
+  const usesMobileInput = () => matchMedia('(max-width:720px), (pointer:coarse)').matches;
   const shortcutLabel = value => String(value || '').replace('Shift+/', '?').replace('Mod', '⌘/Ctrl').replace(/Arrow/g, '');
 
   let journalDocuments = new Map();
@@ -111,6 +112,7 @@
   let expandedCommandSections = new Set();
   let selectedCommand = 0;
   let titleEditOriginal = '';
+  let titleActionPointerActive = false;
   let calendarViewDate = new Date();
   let calendarFocusDate = new Date();
   let calendarSelectAction = null;
@@ -991,12 +993,14 @@ Open, save, export, and reach recent documents or headings from the command pale
     else if (field.value && (field.value.split('\n').every(line => /^\s*>/.test(line)) || field.value.split('\n').some(orgQuoteOpening))) field.classList.add('graph-quote-editor');
     field.dataset.blockId = block.id;
     field.addEventListener('beforeinput', event => {
+      if (handleGraphBlockBeforeInput(event)) return;
       if (!state.vimEnabled && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
-      else if (matchMedia('(max-width:720px)').matches && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
+      else if (usesMobileInput() && /^(insert|delete)/.test(event.inputType || '')) recordVimChange(field);
     });
     field.addEventListener('input', handleGraphBlockInput);
     field.addEventListener('keydown', handleGraphBlockKeydown);
     field.addEventListener('keyup', event => {
+      if (event.key === 'Shift') delete field.dataset.physicalShiftKey;
       if (event.key.length === 1 || ['Backspace', 'Delete'].includes(event.key)) showGraphAutocomplete(field);
     });
     field.addEventListener('compositionend', () => showGraphAutocomplete(field));
@@ -1541,6 +1545,17 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function handleGraphBlockInput(event) {
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
+    const previousContent = location.block.content;
+    const mobileEmptyBackspace = usesMobileInput() && event.inputType === 'deleteContentBackward' && !previousContent && !field.value;
+    if (mobileEmptyBackspace && deleteEmptyGraphBlock(location.block)) return;
+    // Some mobile keyboards mutate the textarea before either beforeinput or
+    // input is observed. Recover the selection from the actual newline diff so
+    // a parent block is never split away from its children.
+    const insertedMobileLine = usesMobileInput() && field.dataset.allowGraphLineBreak !== 'true' ? insertedSingleLineChange(previousContent, field.value) : null;
+    if (insertedMobileLine) {
+      field.value = previousContent; field.setSelectionRange(insertedMobileLine.start, insertedMobileLine.end);
+      if (splitGraphBlock(field, location.block, insertedMobileLine.start, insertedMobileLine.end)) return;
+    }
     const code = field.value.split('\n').some(line => fenceOpening(line));
     const quote = !code && field.value && (field.value.split('\n').every(line => /^\s*>/.test(line)) || field.value.split('\n').some(orgQuoteOpening));
     field.classList.toggle('graph-code-editor', code);
@@ -1653,9 +1668,57 @@ Open, save, export, and reach recent documents or headings from the command pale
     graphMutationFocus(previous, 0); return previous;
   }
 
+  function insertedSingleLineChange(previous, current) {
+    if (previous === current) return null;
+    let start = 0; while (start < previous.length && current[start] === previous[start]) start++;
+    let suffix = 0; while (suffix < previous.length - start && suffix < current.length - start && current.at(-1 - suffix) === previous.at(-1 - suffix)) suffix++;
+    const end = previous.length - suffix;
+    return current.slice(start, current.length - suffix) === '\n' ? { start, end } : null;
+  }
+
+  function deleteEmptyGraphBlock(block) {
+    const location = graphBlockLocation(block.id); if (!location || block.content || visibleGraphBlocks().length <= 1) return false;
+    const visible = visibleGraphBlocks(); const position = visible.indexOf(block); const previous = visible[position - 1] || visible[position + 1];
+    location.blocks.splice(location.index, 1, ...(block.children || [])); graphChanged();
+    if (previous) focusGraphBlock(previous.id); else renderGraphPage();
+    return true;
+  }
+
+  function splitGraphBlock(field, block, start = field.selectionStart, end = field.selectionEnd) {
+    if (caretInsideFence(field.value, start)) return false;
+    if (start === 0 && end === 0) { createPreviousGraphBlock(block); return true; }
+    block.content = field.value.slice(0, start);
+    createNextGraphBlock(block, field.value.slice(end)); return true;
+  }
+
+  function handleGraphBlockBeforeInput(event) {
+    if (!usesMobileInput()) return false;
+    const field = event.currentTarget; const block = graphBlockLocation(field.dataset.blockId)?.block;
+    if (event.inputType === 'deleteContentBackward' && !field.value && field.selectionStart === 0 && field.selectionEnd === 0) {
+      if (!block) return false;
+      event.preventDefault(); deleteEmptyGraphBlock(block); return true;
+    }
+    const enter = ['insertLineBreak', 'insertParagraph'].includes(event.inputType) || (event.inputType === 'insertText' && event.data === '\n');
+    if (!enter) return false;
+    if (field.dataset.allowGraphLineBreak === 'true') { delete field.dataset.allowGraphLineBreak; event.preventDefault(); return true; }
+    if (!block) return false;
+    const insertedLine = insertedSingleLineChange(block.content, field.value);
+    const start = insertedLine?.start ?? field.selectionStart; const end = insertedLine?.end ?? field.selectionEnd;
+    if (insertedLine) { field.value = block.content; field.setSelectionRange(start, end); }
+    if (caretInsideFence(field.value, start)) return false;
+    // WebKit may expose the already-mutated value during beforeinput. Restore
+    // it and cancel the event before rendering/focusing another textarea.
+    event.preventDefault(); splitGraphBlock(field, block, start, end); return true;
+  }
+
   function handleGraphBlockKeydown(event) {
     const field = event.currentTarget; const location = graphBlockLocation(field.dataset.blockId); if (!location) return;
     const block = location.block;
+    if (event.key === 'Shift') { field.dataset.physicalShiftKey = 'true'; return; }
+    // iOS enables the software keyboard's Shift lock automatically at the
+    // beginning of a block. That sets shiftKey on Enter even though the user
+    // did not request Shift+Enter. A real hardware Shift emits its own keydown.
+    const automaticMobileShift = usesMobileInput() && event.key === 'Enter' && event.shiftKey && field.dataset.physicalShiftKey !== 'true';
     if (handleSelectionDelimiter(event) || handleWikiPair(event)) return;
     if (!graphAutocomplete.hidden && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
       event.preventDefault(); handleGraphAutocompleteKey(event.key); return;
@@ -1665,23 +1728,20 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (shortcutMatches('blockUp', event)) { event.preventDefault(); moveGraphBlock(block, -1); return; }
     if (shortcutMatches('blockDown', event)) { event.preventDefault(); moveGraphBlock(block, 1); return; }
     if (shortcutMatches('taskCycle', event)) { event.preventDefault(); toggleGraphTask(block); return; }
-    if (shortcutMatches('blockLine', event)) {
-      if (event.key !== 'Enter') { event.preventDefault(); field.setRangeText('\n', field.selectionStart, field.selectionEnd, 'end'); field.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (shortcutMatches('blockLine', event) && !automaticMobileShift) {
+      event.preventDefault(); field.dataset.allowGraphLineBreak = 'true';
+      field.setRangeText('\n', field.selectionStart, field.selectionEnd, 'end');
+      field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertLineBreak', data: '\n' }));
+      setTimeout(() => { if (field.isConnected) delete field.dataset.allowGraphLineBreak; }, 0);
       return;
     }
-    if (shortcutMatches('blockNew', event)) {
-      const start = field.selectionStart, end = field.selectionEnd;
-      // A fenced code block belongs to one outliner block: Enter must insert a
-      // literal newline instead of creating the next graph block.
-      if (caretInsideFence(field.value, start)) return;
-      event.preventDefault();
-      if (start === 0 && end === 0 && block.children.length) { createPreviousGraphBlock(block); return; }
-      block.content = field.value.slice(0, start);
-      createNextGraphBlock(block, field.value.slice(end)); return;
+    if (shortcutMatches('blockNew', event) || automaticMobileShift) {
+      if (caretInsideFence(field.value, field.selectionStart)) return;
+      event.preventDefault(); splitGraphBlock(field, block); return;
     }
-    if (shortcutMatches('blockDelete', event) && !field.value && visibleGraphBlocks().length > 1) {
-      event.preventDefault(); const visible = visibleGraphBlocks(); const position = visible.indexOf(block); const previous = visible[position - 1] || visible[position + 1];
-      location.blocks.splice(location.index, 1, ...(block.children || [])); graphChanged(); if (previous) focusGraphBlock(previous.id); else renderGraphPage(); return;
+    const mobileBackspace = usesMobileInput() && (event.key === 'Backspace' || event.code === 'Backspace' || event.keyCode === 8);
+    if ((shortcutMatches('blockDelete', event) || mobileBackspace) && !field.value) {
+      event.preventDefault(); if (deleteEmptyGraphBlock(block)) return;
     }
     if ((event.key === 'ArrowUp' && field.selectionStart === 0) || (event.key === 'ArrowDown' && field.selectionStart === field.value.length)) {
       const visible = visibleGraphBlocks(); const index = visible.indexOf(block); const target = visible[index + (event.key === 'ArrowUp' ? -1 : 1)];
@@ -3152,10 +3212,21 @@ Open, save, export, and reach recent documents or headings from the command pale
     } catch (error) { fileName.value = page.title; toast(error.message || 'Could not rename the page'); return false; }
   }
 
-  async function deleteCurrentGraphPage() {
+  let pagePendingDeletion = null;
+  function deleteCurrentGraphPage() {
     const page = state.graphPage;
     if (!state.graphMode || !page || page.journal || page.virtual) return;
-    if (!confirm(`Delete “${page.title}”? This cannot be undone.`)) return;
+    pagePendingDeletion = page;
+    $('#deleteDialogMessage').textContent = `Delete “${page.title}”? This cannot be undone.`;
+    $('#deleteConfirmDialog').hidden = false;
+    requestAnimationFrame(() => $('[data-delete-dialog="cancel"]').focus());
+  }
+
+  function closeDeletePageDialog() { pagePendingDeletion = null; $('#deleteConfirmDialog').hidden = true; }
+
+  async function confirmDeleteCurrentGraphPage() {
+    const page = pagePendingDeletion; closeDeletePageDialog();
+    if (!page || page.path !== state.graphPage?.path) return;
     try {
       commitGraphBlock(); clearTimeout(state.saveTimer); clearTimeout(graphDraftTimer);
       await graphStore.deletePage(page); graphIndex.removePage(page); journalDocuments.delete(page.path);
@@ -3332,10 +3403,16 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (event.key === 'Enter') { event.preventDefault(); $('#saveTitleButton').click(); }
     else if (event.key === 'Escape') { event.preventDefault(); finishTitleEdit(true); fileName.blur(); }
   });
+  documentTitleActions.addEventListener('pointerdown', event => {
+    if (event.target.closest('button')) titleActionPointerActive = true;
+  });
+  const releaseTitleActionPointer = () => setTimeout(() => { titleActionPointerActive = false; }, 0);
+  documentTitleActions.addEventListener('pointerup', releaseTitleActionPointer);
+  documentTitleActions.addEventListener('pointercancel', releaseTitleActionPointer);
   fileName.addEventListener('blur', event => {
     if (!fileName.value.trim()) fileName.value = state.graphMode ? state.graphPage.title : 'Untitled';
     if (!state.graphMode) { persistLocal(false); return; }
-    if (documentTitleActions.contains(event.relatedTarget)) return;
+    if (titleActionPointerActive || documentTitleActions.contains(event.relatedTarget)) return;
     finishTitleEdit(true);
   });
   documentTitleActions.addEventListener('focusout', () => setTimeout(() => {
@@ -3344,7 +3421,23 @@ Open, save, export, and reach recent documents or headings from the command pale
   $('#saveTitleButton').addEventListener('click', async () => {
     if (await renameGraphPage(fileName.value)) { finishTitleEdit(); outliner.focus({ preventScroll: true }); }
   });
-  $('#deletePageButton').addEventListener('click', deleteCurrentGraphPage);
+  let deletePagePointerHandledAt = 0;
+  $('#deletePageButton').addEventListener('pointerup', event => {
+    if (!usesMobileInput()) return;
+    event.preventDefault(); deletePagePointerHandledAt = Date.now(); deleteCurrentGraphPage();
+  });
+  $('#deletePageButton').addEventListener('click', event => {
+    if (Date.now() - deletePagePointerHandledAt < 600) { event.preventDefault(); return; }
+    deleteCurrentGraphPage();
+  });
+  $('#deleteConfirmDialog').addEventListener('click', event => {
+    const action = event.target.closest('[data-delete-dialog]')?.dataset.deleteDialog;
+    if (action === 'cancel') closeDeletePageDialog();
+    else if (action === 'confirm') confirmDeleteCurrentGraphPage();
+  });
+  $('#deleteConfirmDialog').addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); closeDeletePageDialog(); }
+  });
   editor.addEventListener('input', event => {
     if (!event.target.matches?.('.md-source-block') && event.inputType?.startsWith('insert')) transformInlineMarkdown();
     changed();
