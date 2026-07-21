@@ -62,7 +62,7 @@ Use the palette to find pages and blocks, change themes, open files, navigate jo
 
 ## Settings
 
-Open the page menu from the gear icon at the right side of the footer. It provides **New page**, **Delete page** when the current page can be deleted, **Settings**, **Shortcuts**, and **Documentation**. You can also open Settings directly with `⌘/Ctrl + ,`.
+Open the page menu from the gear icon at the right side of the footer. It provides **New page**, **Delete page** when the current page can be deleted, **Page history**, **Settings**, **Shortcuts**, and **Documentation**. You can also open Settings directly with `⌘/Ctrl + ,`.
 
 - **General** controls the light, dark, or system theme, the accent color, and Vim mode.
 - **Shortcuts** lists keyboard commands by section. Search the list, select a shortcut, and press a new key combination to replace it. Use **Reset** to restore its default.
@@ -125,6 +125,12 @@ Enter a title. If the page does not exist, choose **Create page** and press `Ent
 ### Rename a page
 
 Use **Rename document** or `F2`, edit the title, then select the minimal checkmark icon to save. The adjacent trash icon deletes the current page after confirmation. notd can update matching `[[...]]` references throughout the graph. Case-only changes such as `test` to `Test` are supported, including on case-insensitive filesystems. Journal pages cannot be renamed or deleted, preserving Logseq compatibility.
+
+### Page history
+
+When the server graph is inside a Git repository, choose **Page history** from the footer menu to display up to 100 commits for the current Markdown file. Each entry shows the short commit hash, subject, author, and date. Expand a commit to load and display its unified diff for that page; diffs are fetched only when requested. Added lines are highlighted in green, removed lines in red, hunk headers in cyan, and Git metadata with the same syntax palette used by code blocks. Rename history is followed when Git can detect it, and a notice appears when the working copy has uncommitted changes.
+
+The browser cannot inspect Git repositories opened directly through the File System Access API, so this feature requires `server.py`. The Docker image includes Git. notd invokes Git with argument arrays rather than a shell and restricts the requested path to the configured graph.
 
 ## Blocks and outliner
 

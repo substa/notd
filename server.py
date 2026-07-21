@@ -14,6 +14,7 @@ import mimetypes
 import os
 import queue
 import re
+import subprocess
 import tempfile
 import threading
 import time
@@ -221,6 +222,23 @@ class NotdHandler(SimpleHTTPRequestHandler):
             raise ValueError("Only Markdown files can be modified")
         return target
 
+    def git_context(self, target: Path) -> tuple[Path | None, str | None, str | None]:
+        try:
+            repository = subprocess.run(
+                ["git", "-C", str(self.graph), "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None, None, "Git is not available on the server"
+        if repository.returncode:
+            return None, None, "The graph is not inside a Git repository"
+        repository_root = Path(repository.stdout.strip()).resolve()
+        try:
+            repository_path = target.resolve().relative_to(repository_root).as_posix()
+        except ValueError:
+            return None, None, "The page is outside the Git repository"
+        return repository_root, repository_path, None
+
     def request_json(self) -> dict:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -374,6 +392,61 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 target = self.graph_path(raw_path, markdown_only=True)
                 stat = target.stat()
                 return self.json_response({"path": raw_path, "content": target.read_text(encoding="utf-8"), "revision": str(stat.st_mtime_ns)})
+            if parsed.path == "/api/graph/history":
+                target = self.graph_path(raw_path, markdown_only=True)
+                if not target.is_file():
+                    raise FileNotFoundError(raw_path)
+                repository_root, repository_path, message = self.git_context(target)
+                if not repository_root or not repository_path:
+                    return self.json_response({"available": False, "dirty": False, "commits": [], "message": message})
+                history = subprocess.run(
+                    ["git", "-C", str(repository_root), "log", "--follow", "-n", "100", "--date=iso-strict", "--format=%x1e%H%x1f%an%x1f%aI%x1f%s", "--name-only", "--", repository_path],
+                    capture_output=True, text=True, timeout=10, check=False,
+                )
+                status = subprocess.run(
+                    ["git", "-C", str(repository_root), "status", "--porcelain=v1", "--", repository_path],
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                if history.returncode:
+                    raise ValueError(history.stderr.strip() or "Could not read Git history")
+                commits = []
+                for record in history.stdout.split("\x1e"):
+                    fields = record.strip("\r\n").split("\x1f", 3)
+                    if len(fields) != 4:
+                        continue
+                    subject_and_paths = fields[3].splitlines()
+                    subject = subject_and_paths[0] if subject_and_paths else ""
+                    changed_paths = [path.strip() for path in subject_and_paths[1:] if path.strip()]
+                    commits.append({"hash": fields[0], "author": fields[1], "date": fields[2], "subject": subject, "gitPath": changed_paths[-1] if changed_paths else repository_path})
+                return self.json_response({"available": True, "dirty": bool(status.stdout.strip()), "commits": commits, "path": repository_path})
+            if parsed.path == "/api/graph/history/diff":
+                target = self.graph_path(raw_path, markdown_only=True)
+                if not target.is_file():
+                    raise FileNotFoundError(raw_path)
+                repository_root, repository_path, message = self.git_context(target)
+                if not repository_root or not repository_path:
+                    return self.json_response({"available": False, "diff": "", "message": message})
+                commit = query.get("commit", [""])[0]
+                if not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", commit):
+                    raise ValueError("Invalid Git commit")
+                git_path = query.get("gitPath", [repository_path])[0]
+                relative = PurePosixPath(git_path)
+                if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+                    raise ValueError("Invalid historical page path")
+                historical_target = (repository_root / Path(*relative.parts)).resolve()
+                historical_target.relative_to(self.graph.resolve())
+                if historical_target.suffix.lower() not in MARKDOWN_SUFFIXES:
+                    raise ValueError("Only Markdown history can be viewed")
+                result = subprocess.run(
+                    ["git", "-C", str(repository_root), "show", "--format=", "--no-color", "--no-ext-diff", "--text", "--find-renames", commit, "--", relative.as_posix()],
+                    capture_output=True, text=True, timeout=10, check=False,
+                )
+                if result.returncode:
+                    raise ValueError(result.stderr.strip() or "Could not read commit diff")
+                limit = 2_000_000
+                truncated = len(result.stdout) > limit
+                diff = result.stdout[:limit] + ("\n… diff truncated …\n" if truncated else "")
+                return self.json_response({"available": True, "diff": diff, "truncated": truncated})
             if parsed.path == "/api/graph/asset":
                 target = self.graph_path(raw_path)
                 if not target.is_file():
@@ -392,7 +465,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
             self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         except FileNotFoundError:
             self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
-        except (ValueError, OSError, UnicodeError) as error:
+        except (ValueError, OSError, UnicodeError, subprocess.TimeoutExpired) as error:
             self.error_json(HTTPStatus.BAD_REQUEST, str(error))
 
     def atomic_write(self, target: Path, content: str) -> int:

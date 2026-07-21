@@ -268,6 +268,18 @@ Open, save, export, and reach recent documents or headings from the command pale
     return `<pre${label ? ` data-lang="${escapeHtml(label)}"` : ''} class="graph-code-block"><code class="language-${safeLanguage}">${highlightCode(code, label)}</code></pre>`;
   }
 
+  function highlightedGitDiff(diff = '') {
+    return String(diff).replace(/\r\n?/g, '\n').split('\n').map(line => {
+      let type = 'context';
+      if (/^\+\+\+|^---|^diff --git|^index\s/.test(line)) type = 'metadata';
+      else if (line.startsWith('+')) type = 'addition';
+      else if (line.startsWith('-')) type = 'removal';
+      else if (line.startsWith('@@')) type = 'hunk';
+      else if (/^\\ No newline/.test(line) || /diff truncated/.test(line)) type = 'notice';
+      return `<span class="diff-line diff-line-${type}">${escapeHtml(line) || ' '}</span>`;
+    }).join('');
+  }
+
   function fenceOpening(line = '') {
     const opening = line.match(/^\s*(`{3,}|~{3,})[^\S\n]*([^\s`]*)[^\n]*$/);
     if (!opening) return null;
@@ -3350,11 +3362,46 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !journalCalendar.hidden) closeJournalCalendar(); });
   $('#commandButton').addEventListener('click', () => showCommandPalette());
+  let pageHistoryReturnFocus = null;
+  function closePageHistory() {
+    const view = $('#pageHistoryView'); if (view.hidden) return;
+    view.hidden = true;
+    if (pageHistoryReturnFocus?.isConnected) pageHistoryReturnFocus.focus(); else $('#footerMenuButton').focus();
+  }
+  async function showPageHistory() {
+    const page = state.graphPage;
+    if (!state.graphMode || !page || page.virtual) return toast('Open a saved graph page first');
+    pageHistoryReturnFocus = $('#footerMenuButton');
+    $('#pageHistoryView').hidden = false;
+    $('#pageHistoryTitle').textContent = page.title;
+    $('#pageHistoryContent').innerHTML = '<p class="page-history-message">Loading Git history…</p>';
+    if (!graphStore?.isRemote) {
+      $('#pageHistoryContent').innerHTML = '<p class="page-history-message">Page history is available when the graph is served by notd server.</p>';
+      return;
+    }
+    commitGraphBlock(); await flushGraphSave(false);
+    try {
+      const result = await graphStore.api(`/history?path=${encodeURIComponent(page.path)}`);
+      if (!result.available) {
+        $('#pageHistoryContent').innerHTML = `<p class="page-history-message">${escapeHtml(result.message || 'Git history is unavailable.')}</p>`;
+        return;
+      }
+      const dirty = result.dirty ? '<p class="page-history-dirty">This page has uncommitted changes.</p>' : '';
+      const commits = (result.commits || []).map(commit => {
+        const parsed = new Date(commit.date); const date = Number.isNaN(parsed.getTime()) ? commit.date : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed);
+        return `<details class="page-history-commit" data-history-commit="${escapeHtml(commit.hash)}" data-history-path="${escapeHtml(commit.gitPath || result.path)}"><summary><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.hash.slice(0, 8))}</code><div><strong>${escapeHtml(commit.subject || 'Untitled commit')}</strong><span>${escapeHtml(commit.author)} · ${escapeHtml(date)}</span></div><i aria-hidden="true"></i></summary><pre class="page-history-diff">Open to load the diff…</pre></details>`;
+      }).join('');
+      $('#pageHistoryContent').innerHTML = `${dirty}${commits || '<p class="page-history-message">This page has not been committed yet.</p>'}`;
+    } catch (error) {
+      $('#pageHistoryContent').innerHTML = `<p class="page-history-message">${escapeHtml(error.message || 'Could not load Git history.')}</p>`;
+    }
+  }
   function closeFooterMenu() { $('#footerMenu').hidden = true; $('#footerMenuButton').setAttribute('aria-expanded', 'false'); }
   function toggleFooterMenu() {
     const opening = $('#footerMenu').hidden;
     if (!opening) return closeFooterMenu();
     const page = state.graphPage; $('[data-footer-action="delete-page"]').hidden = !state.graphMode || !page || page.journal || page.virtual;
+    $('[data-footer-action="page-history"]').hidden = !state.graphMode || !page || page.virtual;
     $('#footerMenu').hidden = false; $('#footerMenuButton').setAttribute('aria-expanded', 'true');
     requestAnimationFrame(() => $('#footerMenu button:not([hidden])')?.focus());
   }
@@ -3364,12 +3411,33 @@ Open, save, export, and reach recent documents or headings from the command pale
     closeFooterMenu();
     if (action === 'new-page') requestAction(createGraphPage);
     else if (action === 'delete-page') deleteCurrentGraphPage();
+    else if (action === 'page-history') showPageHistory();
     else if (action === 'settings') showSettings('general');
     else if (action === 'shortcuts') showSettings('shortcuts');
     else if (action === 'documentation') showDocumentation();
   });
   document.addEventListener('pointerdown', event => { if (!$('#footerMenu').hidden && !$('#footerMenu').contains(event.target) && !$('#footerMenuButton').contains(event.target)) closeFooterMenu(); });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#footerMenu').hidden) { event.preventDefault(); closeFooterMenu(); $('#footerMenuButton').focus(); } });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !$('#footerMenu').hidden) { event.preventDefault(); closeFooterMenu(); $('#footerMenuButton').focus(); }
+    else if (event.key === 'Escape' && !$('#pageHistoryView').hidden) { event.preventDefault(); closePageHistory(); }
+  });
+  $('#pageHistoryClose').addEventListener('click', closePageHistory);
+  $('#pageHistoryContent').addEventListener('toggle', async event => {
+    const details = event.target.closest?.('[data-history-commit]');
+    if (!details?.open || details.dataset.historyLoaded) return;
+    details.dataset.historyLoaded = 'true';
+    const output = $('.page-history-diff', details); output.textContent = 'Loading diff…';
+    try {
+      const path = state.graphPage?.path; if (!path || !graphStore?.isRemote) throw new Error('Git diff is unavailable');
+      const query = new URLSearchParams({ path, commit: details.dataset.historyCommit, gitPath: details.dataset.historyPath });
+      const result = await graphStore.api(`/history/diff?${query}`);
+      if (result.diff) output.innerHTML = highlightedGitDiff(result.diff);
+      else output.textContent = 'No textual changes for this file in this commit.';
+    } catch (error) {
+      output.textContent = error.message || 'Could not load the diff.';
+      delete details.dataset.historyLoaded;
+    }
+  }, true);
   $('#settingsClose').addEventListener('click', closeDocumentation);
   $('.settings-nav').addEventListener('click', event => { const tab = event.target.closest('[data-settings-tab]')?.dataset.settingsTab; if (tab) showSettings(tab); });
   $('#documentationMenu').addEventListener('click', event => {
