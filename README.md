@@ -68,7 +68,7 @@ The app is entirely static and can be deployed to any HTTPS host, including GitH
 
 ## Privacy
 
-In direct local mode, no content is sent to a server. Automatic document copies are stored in `localStorage`; graph recovery drafts and the selected directory handle are stored in IndexedDB. When `server.py --graph` is used, content is exchanged only with that markd server so LAN clients can share the graph. The Markdown files in the selected or served graph remain the source of truth.
+In direct local mode, no content is sent to a server. Automatic copies of standalone documents are stored in `localStorage`; graph recovery drafts and the selected directory handle are stored in IndexedDB. Graph preferences—including theme, Vim mode, collapsed blocks, recent pages, and journal formats—are stored in `.markd/settings.json` inside the graph, so they follow the same graph across devices. On first import, compatible journal formats are copied from `logseq/config.edn`; afterward `.markd/settings.json` is authoritative for markd. When `server.py --graph` is used, content is exchanged only with that markd server. The Markdown files in the selected or served graph remain the source of truth.
 
 ## Local graph support
 

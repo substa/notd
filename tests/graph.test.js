@@ -131,6 +131,14 @@ test('resolves graph assets relative to the page folder', () => {
   assert.equal(Graph.resolveAssetPath('./images/image.jpg', 'pages/nested'), 'pages/nested/images/image.jpg');
 });
 
+test('applies journal formats imported into graph settings', () => {
+  const store = new Graph.GraphStore({ name: 'Notes' });
+  store.applySettings({ journal: { fileNameFormat: 'yyyy-MM-dd', pageTitleFormat: 'MMMM do, yyyy' } });
+  assert.equal(store.config.fileNameFormat, 'yyyy-MM-dd');
+  assert.equal(store.config.pageTitleFormat, 'MMMM do, yyyy');
+  assert.equal(store.settingsConfig, true);
+});
+
 test('uses Logseq-compatible journal date formats', () => {
   const date = new Date(2026, 6, 17);
   assert.equal(Graph.formatJournalDate(date, 'yyyy_MM_dd'), '2026_07_17');

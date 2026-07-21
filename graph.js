@@ -274,6 +274,36 @@
       return directory;
     }
 
+    async readSettings() {
+      try {
+        const directory = await this.handle.getDirectoryHandle('.markd');
+        const file = await (await directory.getFileHandle('settings.json')).getFile();
+        const settings = JSON.parse(await file.text());
+        if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('Graph settings must be a JSON object');
+        return settings;
+      } catch (error) {
+        if (error.name === 'NotFoundError') return null;
+        throw error;
+      }
+    }
+
+    async writeSettings(settings) {
+      if (!(await this.ensurePermission(true))) throw new Error('Graph is read only');
+      const directory = await this.handle.getDirectoryHandle('.markd', { create: true });
+      const handle = await directory.getFileHandle('settings.json', { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(`${JSON.stringify(settings, null, 2)}\n`); await writable.close();
+    }
+
+    applySettings(settings = {}) {
+      if (!settings.journal || typeof settings.journal !== 'object') return;
+      this.config = {
+        pageTitleFormat: typeof settings.journal.pageTitleFormat === 'string' ? settings.journal.pageTitleFormat : defaultJournalConfig.pageTitleFormat,
+        fileNameFormat: typeof settings.journal.fileNameFormat === 'string' ? settings.journal.fileNameFormat : defaultJournalConfig.fileNameFormat
+      };
+      this.settingsConfig = true;
+    }
+
     async readConfig() {
       try {
         const directory = await this.handle.getDirectoryHandle('logseq');
@@ -291,7 +321,7 @@
 
     async scan() {
       if (!(await this.ensurePermission(false))) throw new Error('Graph permission is required');
-      await this.readConfig();
+      if (!this.settingsConfig) await this.readConfig();
       const pages = [];
       const walk = async (directory, folder = '') => {
         for await (const [name, handle] of directory.entries()) {
@@ -515,6 +545,27 @@
 
     async ensurePermission() { return true; }
 
+    applySettings(settings = {}) {
+      if (!settings.journal || typeof settings.journal !== 'object') return;
+      this.config = {
+        pageTitleFormat: typeof settings.journal.pageTitleFormat === 'string' ? settings.journal.pageTitleFormat : defaultJournalConfig.pageTitleFormat,
+        fileNameFormat: typeof settings.journal.fileNameFormat === 'string' ? settings.journal.fileNameFormat : defaultJournalConfig.fileNameFormat
+      };
+      this.settingsConfig = true;
+    }
+
+    async readSettings() {
+      try { return await this.api('/settings'); }
+      catch (error) { if (/\(404\)|not found/i.test(error.message)) return null; throw error; }
+    }
+
+    async writeSettings(settings) {
+      await this.api('/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings, clientId: this.clientId })
+      });
+    }
+
     subscribe(listener) {
       const events = new EventSource(`${this.baseUrl}/events`);
       events.onmessage = message => {
@@ -541,7 +592,7 @@
 
     async scan() {
       const payload = await this.api('/files');
-      this.config = { ...defaultJournalConfig, ...(payload.config || {}) };
+      if (!this.settingsConfig) this.config = { ...defaultJournalConfig, ...(payload.config || {}) };
       this.pages = payload.files.map(file => this.pageFromFile(file)).sort((a, b) => a.title.localeCompare(b.title));
       return this.pages;
     }

@@ -153,14 +153,16 @@ The default filename is:
 journals/yyyy_MM_dd.md
 ```
 
-markd reads these settings from `logseq/config.edn`:
+When a graph is opened for the first time, markd imports these compatible settings from `logseq/config.edn`:
 
 ```clojure
 :journal/file-name-format
 :journal/page-title-format
 ```
 
-Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page. When previous-year entries exist, the bottom of today's page shows an **on this day** link that expands a timeline of all top-level blocks created on the same month and day in previous years. Blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline.
+The imported values are written to `.markd/settings.json`, which then becomes markd's source of truth. The original Logseq configuration is left unchanged, so an existing graph can be imported safely and subsequently managed by markd on every device.
+
+Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page. When previous-year entries exist and today's journal is empty, its first empty block is shown below the title and task count, followed by the **on this day** timeline. The timeline moves to a collapsible link at the bottom of today's entry as soon as the empty block receives focus. The timeline includes all top-level blocks created on the same month and day in previous years; blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline.
 
 ### Journal commands
 
@@ -186,7 +188,7 @@ Type `<` to use structural insertion commands:
 
 ## Vim mode
 
-Run **Toggle Vim mode** from the command palette. The setting persists in the browser.
+Run **Toggle Vim mode** from the command palette. For an open graph, the setting persists in `.markd/settings.json` and follows the graph across devices.
 
 ### Modes
 
@@ -302,7 +304,7 @@ Available themes:
 - Dark;
 - System, which switches automatically when the operating-system preference changes.
 
-The selected theme persists in the browser.
+For an open graph, the selected theme persists in `.markd/settings.json` and follows the graph across devices.
 
 Fonts and the main colors for the light and dark themes can be customized in `theme-config.css`. This file is loaded after the application stylesheet, so its CSS variables override the defaults without requiring changes to `styles.css`.
 

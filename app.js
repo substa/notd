@@ -23,12 +23,16 @@
   const saveState = $('#saveState');
   const STORAGE_KEY = 'markd-markdown-documents-v1';
   const SETTINGS_KEY = 'markd-markdown-settings-v1';
+  const localSettings = () => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch { return {}; } };
+  let graphSettings = null;
+  let graphSettingsTimer = null;
+  const currentSettings = () => graphSettings || localSettings();
 
   let state = {
     markdown: '', fileHandle: null, dirty: false, sourceMode: false,
     vimEnabled: false, vimMode: 'normal', currentId: null, pendingAction: null, saveTimer: null,
     graphMode: false, graphPage: null, graphDocument: null, graphZoomId: null, graphConflict: false,
-    journalMode: false, journalLimit: 1, referencesExpanded: false, onThisDayExpanded: false, taskView: null, taskLimits: {}, taskExpanded: {}
+    journalMode: false, journalLimit: 1, referencesExpanded: false, onThisDayExpanded: false, onThisDayEmptyDismissed: false, taskView: null, taskLimits: {}, taskExpanded: {}
   };
   let journalDocuments = new Map();
   let graphHistory = [];
@@ -424,14 +428,14 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function restoreGraphCollapse(document = state.graphDocument, page = state.graphPage) {
-    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const settings = currentSettings();
     const collapsed = new Set(settings.graphCollapsed?.[page?.path] || []);
     MarkdGraph.flattenBlocks(document?.blocks).forEach(({ block }) => { block.collapsed = collapsed.has(block.id); });
   }
 
   function saveGraphCollapse() {
     if (!state.graphPage) return;
-    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const settings = currentSettings();
     const ids = MarkdGraph.flattenBlocks(state.graphDocument?.blocks).filter(({ block }) => block.collapsed).map(({ block }) => block.id);
     saveSettings({ graphCollapsed: { ...(settings.graphCollapsed || {}), [state.graphPage.path]: ids } });
   }
@@ -653,7 +657,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function taskSummary() {
     const groups = taskGroups(); const overview = taskOverviewGroups(groups);
-    return { today: overview.today.length, week: uniqueTasks(groups.today, groups.thisWeek).length };
+    return { today: overview.today.length, progress: overview.progress.length };
   }
 
   function taskRowsHtml(items) {
@@ -673,17 +677,21 @@ Open, save, export, and reach recent documents or headings from the command pale
     }).sort((a, b) => b.journalDate.localeCompare(a.journalDate));
   }
 
-  function onThisDayElement() {
+  function journalDocumentIsEmpty(document) {
+    return !MarkdGraph.flattenBlocks(document?.blocks || []).some(({ block }) => String(block.content || '').trim());
+  }
+
+  function onThisDayElement({ expanded = state.onThisDayExpanded, featured = false } = {}) {
     const histories = onThisDayPages().map(page => ({
       page,
       blocks: cachedJournalDocument(page).blocks.filter(block => !/(^|\s)#worklog\b/i.test(block.content) && block.content.split('\n').some(line => line.trim() && !/^\s*[\w-]+::/.test(line)))
     })).filter(history => history.blocks.length);
     if (!histories.length) return null;
-    const wrapper = document.createElement('section'); wrapper.className = 'on-this-day';
-    const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'on-this-day-toggle'; toggle.dataset.onThisDayToggle = '';
-    toggle.setAttribute('aria-expanded', String(state.onThisDayExpanded));
-    toggle.textContent = 'on this day'; wrapper.append(toggle);
-    if (!state.onThisDayExpanded) return wrapper;
+    const wrapper = document.createElement('section'); wrapper.className = `on-this-day${featured ? ' on-this-day-featured' : ''}`;
+    const toggle = document.createElement(featured ? 'h2' : 'button');
+    if (!featured) { toggle.type = 'button'; toggle.dataset.onThisDayToggle = ''; toggle.setAttribute('aria-expanded', String(expanded)); }
+    toggle.className = 'on-this-day-toggle'; toggle.textContent = 'on this day'; wrapper.append(toggle);
+    if (!expanded) return wrapper;
     const list = document.createElement('div'); list.className = 'on-this-day-list';
     for (const { page, blocks } of histories) {
       const group = document.createElement('section'); group.className = 'on-this-day-year';
@@ -799,19 +807,22 @@ Open, save, export, and reach recent documents or headings from the command pale
         section.className = `journal-entry${page.path === state.graphPage.path ? ' active' : ''}${page.journalDate === today ? ' today' : ''}`; section.dataset.journalPath = page.path;
         const heading = document.createElement('button'); heading.type = 'button'; heading.className = 'journal-heading';
         heading.dataset.journalPage = page.path; heading.textContent = page.title; section.append(heading);
+        const emptyToday = page.journalDate === today && journalDocumentIsEmpty(journalDocument);
         if (page.journalDate === today) {
           const summary = taskSummary(); const button = document.createElement('button'); button.type = 'button'; button.className = 'journal-task-summary'; button.dataset.openTaskView = '';
           const expanded = state.taskView === 'summary';
           button.setAttribute('aria-expanded', String(expanded));
           const arrow = document.createElement('span'); arrow.className = 'journal-task-summary-arrow'; arrow.setAttribute('aria-hidden', 'true');
-          const label = document.createElement('span'); label.textContent = `${summary.today} ${summary.today === 1 ? 'task' : 'tasks'} today, ${summary.week} this week`;
+          const label = document.createElement('span'); label.textContent = `${summary.today} ${summary.today === 1 ? 'task' : 'tasks'} today, ${summary.progress} in progress`;
           button.append(arrow, label); section.append(button);
           if (state.taskView === 'summary') section.append(journalTaskPanelElement());
         }
         const preamble = visibleGraphPreamble(journalDocument.preamble);
         if (preamble) { const properties = document.createElement('div'); properties.className = 'journal-preamble'; properties.textContent = preamble; section.append(properties); }
         const tree = document.createElement('div'); tree.className = 'journal-blocks'; tree.append(renderBlocks(journalDocument.blocks, page)); section.append(tree);
-        if (page.journalDate === today) {
+        if (emptyToday && !state.onThisDayEmptyDismissed) {
+          const history = onThisDayElement({ expanded: true, featured: true }); if (history) section.append(history);
+        } else if (page.journalDate === today) {
           const history = onThisDayElement(); if (history) section.append(history);
         }
         fragment.append(section);
@@ -902,6 +913,14 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function activateGraphBlock(block, position = null, page = state.graphPage) {
     if (!block || state.sourceMode) return;
+    const today = MarkdGraph.journalInfo(new Date(), graphStore?.config).date;
+    if (state.journalMode && page?.path === state.graphPage?.path && page.journalDate === today && journalDocumentIsEmpty(state.graphDocument) && !state.onThisDayEmptyDismissed) {
+      state.onThisDayEmptyDismissed = true; state.onThisDayExpanded = false;
+      const entry = blockTree.querySelector('.journal-entry.today'); const featured = entry?.querySelector('.on-this-day-featured');
+      const history = onThisDayElement();
+      if (featured && history) { entry.append(history); featured.remove(); }
+      else featured?.remove();
+    }
     clearGraphBlockSelection();
     if (activeGraphBlock?.block === block) return activeGraphBlock.field.focus();
     commitGraphBlock();
@@ -1043,7 +1062,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   function rememberGraphPage(page) {
-    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const settings = currentSettings();
     const item = { graph: graphStore?.name || '', path: page.path, title: page.title };
     const recentGraphPages = [item, ...(settings.recentGraphPages || []).filter(recent => recent.graph !== item.graph || recent.path !== item.path)].slice(0, 20);
     saveSettings({ lastGraphPage: page.title, recentGraphPages });
@@ -1123,7 +1142,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const draftConflict = Boolean(draft?.modified && draft.modified !== page.lastModified);
     recordGraphHistory(page, options);
     state.graphMode = true; state.graphPage = page; state.graphDocument = MarkdGraph.parseDocument(content); restoreGraphCollapse();
-    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false; state.onThisDayExpanded = false;
+    state.journalMode = Boolean(options.journalMode); state.journalLimit = options.resetJournalLimit ? 1 : state.journalLimit; state.referencesExpanded = false; state.onThisDayExpanded = false; state.onThisDayEmptyDismissed = false;
     state.taskView = page.name.toLowerCase() === 'tasks.md' ? 'all' : null;
     if (state.journalMode) journalDocuments.set(page.path, state.graphDocument);
     state.graphZoomId = options.blockId || null; state.sourceMode = false; state.dirty = Boolean(draft); state.graphConflict = draftConflict; state.fileHandle = null;
@@ -1201,7 +1220,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       if (state.graphMode && state.dirty && !(await flushGraphSave(true))) return;
       saveState.textContent = 'Opening graph…';
       closeRemoteEvents?.(); closeRemoteEvents = null;
-      graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open();
+      graphStore?.disposeAssets(); graphStore = await MarkdGraph.GraphStore.open(); graphSettings = null;
+      await loadGraphSettings();
       const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
       journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding();
       toast(`Opened ${graphStore.name}`);
@@ -1900,14 +1920,14 @@ Open, save, export, and reach recent documents or headings from the command pale
     activateSourceBlock(block);
   }
 
-  function setVimEnabled(enabled = !state.vimEnabled, refocus = true) {
+  function setVimEnabled(enabled = !state.vimEnabled, refocus = true, persist = true) {
     if (state.vimEnabled && state.vimMode === 'insert') finishVimInsertChange();
     state.vimEnabled = enabled;
     state.vimMode = 'normal';
     vimPending = '';
     $$('.md-source-block, .graph-block-editor, #sourceEditor').forEach(item => item.classList.remove('vim-normal', 'vim-insert', 'vim-empty'));
     updateVimUi();
-    saveSettings({ vimEnabled: enabled });
+    if (persist) saveSettings({ vimEnabled: enabled });
     if (enabled && refocus) requestAnimationFrame(focusVimEditor);
     if (!enabled) {
       const field = vimField();
@@ -2777,7 +2797,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const searchQuery = query.toLowerCase();
     const normalizedQuery = query && MarkdGraph.normalizePage(query);
     const seen = new Set();
-    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+    const settings = currentSettings();
     const storedPages = (settings.recentGraphPages || []).filter(item => item.graph === graphStore?.name)
       .map(item => graphStore?.pages.find(page => page.path === item.path)).filter(Boolean);
     let graphPages = [...graphHistory].reverse().map(entry => graphStore?.pages.find(page => page.path === entry.path)).filter(Boolean);
@@ -3295,8 +3315,37 @@ Open, save, export, and reach recent documents or headings from the command pale
   if (systemColorScheme.addEventListener) systemColorScheme.addEventListener('change', () => { if (selectedTheme === 'system') applyTheme(); });
   else systemColorScheme.addListener(() => { if (selectedTheme === 'system') applyTheme(); });
   function saveSettings(change) {
-    let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, ...change }));
+    const updated = { ...currentSettings(), ...change };
+    if (graphStore && graphSettings !== null) {
+      graphSettings = updated;
+      clearTimeout(graphSettingsTimer);
+      const store = graphStore; const value = graphSettings;
+      graphSettingsTimer = setTimeout(() => store.writeSettings(value).catch(() => toast('Could not save graph settings')), 180);
+    } else localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+  }
+
+  async function loadGraphSettings() {
+    if (!graphStore.isRemote && graphStore.readConfig) await graphStore.readConfig();
+    const importedJournal = { ...graphStore.config };
+    const stored = await graphStore.readSettings();
+    let migrated = false;
+    if (stored) {
+      graphSettings = stored;
+      if (graphSettings.schemaVersion !== 1) { graphSettings = { ...graphSettings, schemaVersion: 1 }; migrated = true; }
+      if (!graphSettings.journal || typeof graphSettings.journal !== 'object') { graphSettings = { ...graphSettings, journal: importedJournal }; migrated = true; }
+    } else {
+      const local = localSettings();
+      graphSettings = {
+        schemaVersion: 1,
+        ...Object.fromEntries(['theme', 'vimEnabled', 'graphCollapsed', 'lastGraphPage', 'recentGraphPages'].filter(key => key in local).map(key => [key, local[key]])),
+        journal: importedJournal
+      };
+      migrated = true;
+    }
+    graphStore.applySettings(graphSettings);
+    if (migrated) await graphStore.writeSettings(graphSettings);
+    setTheme(graphSettings.theme || 'system', false);
+    setVimEnabled(Boolean(graphSettings.vimEnabled), false, false);
   }
 
   $('#findInput').addEventListener('keydown', event => { if (event.key === 'Enter') find(event.shiftKey); if (event.key === 'Escape') $('#findbar').hidden = true; });
@@ -3413,11 +3462,11 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
 
   // Initial state
-  let settings = {}; try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch {}
+  let settings = localSettings();
   const savedTheme = ['light', 'dark', 'system'].includes(settings.theme) ? settings.theme : 'system';
   setTheme(savedTheme, false);
   if (settings.theme !== savedTheme) saveSettings({ theme: savedTheme });
-  setVimEnabled(Boolean(settings.vimEnabled), false);
+  setVimEnabled(Boolean(settings.vimEnabled), false, false);
   let docs = getStoredDocs();
   if (settings.welcomeVersion !== WELCOME_VERSION) {
     const welcome = docs.find(doc => doc.name === 'Welcome' || doc.name === 'Benvenuto');
@@ -3437,7 +3486,8 @@ Open, save, export, and reach recent documents or headings from the command pale
   (async () => {
     try {
       const remote = await MarkdGraph.RemoteGraphStore.connect();
-      graphStore = remote; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages); watchRemoteGraph();
+      graphStore = remote; graphSettings = null; await loadGraphSettings();
+      const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages); watchRemoteGraph();
       if (state.dirty) return;
       journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding({ replaceRoute: true });
       return;
@@ -3445,7 +3495,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     try {
       const restored = await MarkdGraph.GraphStore.restore();
       if (restored && await restored.ensurePermission(false)) {
-        graphStore = restored; const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
+        graphStore = restored; graphSettings = null; await loadGraphSettings();
+        const pages = await graphStore.scan(); graphIndex = new MarkdGraph.GraphIndex(pages);
         if (state.dirty) return;
         journalDocuments.clear(); graphHistory = []; graphHistoryIndex = -1; await openGraphLanding({ replaceRoute: true });
         return;

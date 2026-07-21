@@ -320,6 +320,14 @@ class MarkdHandler(SimpleHTTPRequestHandler):
                 return self.stream_events()
             if parsed.path == "/api/graph/status":
                 return self.json_response({"enabled": True, "name": self.graph.name, "config": journal_config(self.graph)})
+            if parsed.path == "/api/graph/settings":
+                target = self.graph / ".markd" / "settings.json"
+                if not target.is_file():
+                    raise FileNotFoundError("settings.json")
+                settings = json.loads(target.read_text(encoding="utf-8"))
+                if not isinstance(settings, dict):
+                    raise ValueError("Graph settings must be a JSON object")
+                return self.json_response(settings)
             if parsed.path == "/api/graph/stats":
                 files = 0
                 size = 0
@@ -430,6 +438,20 @@ class MarkdHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self.require_api_access(parsed, write=True):
             return
+        if parsed.path == "/api/graph/settings":
+            if not self.graph:
+                return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
+            try:
+                payload = self.request_json()
+                settings = payload.get("settings")
+                if not isinstance(settings, dict):
+                    raise ValueError("Graph settings must be a JSON object")
+                content = json.dumps(settings, ensure_ascii=False, indent=2) + "\n"
+                with self.server.mutation_lock:  # type: ignore[attr-defined]
+                    self.atomic_write(self.graph / ".markd" / "settings.json", content)
+                return self.json_response({"saved": True})
+            except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
+                return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
         if parsed.path == "/api/graph/asset":
             if not self.graph:
                 return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
