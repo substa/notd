@@ -200,7 +200,17 @@ body {
   letter-spacing: .06em;
   text-transform: uppercase;
 }
-.graph-block-content blockquote {
+.references .reference-result { color: var(--text); }
+.reference-result code {
+  padding: .12em .3em;
+  border-radius: 4px;
+  background: var(--code);
+  font-family: var(--mono);
+  font-size: .86em;
+}
+.reference-result .graph-code-block code { padding: 0; background: none; font: inherit; }
+.graph-block-content blockquote,
+.reference-result blockquote {
   margin: .25em 0 .45em;
   padding: .65em .9em .65em 1em;
   border-left: 2px solid var(--faint);

@@ -688,29 +688,32 @@ Open, save, export, and reach recent documents or headings from the command pale
     return graphMixedMarkdownHtml(visible, block);
   }
 
+  function resolveGraphContentAssets(content, page) {
+    if (!graphStore || !page) return;
+    const fromFolder = page.path?.includes('/') ? page.path.split('/').slice(0, -1).join('/') : (page.folder || '');
+    $$('img, audio, video', content).forEach(media => {
+      const source = media.getAttribute('src');
+      if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, fromFolder).then(url => { if (media.isConnected) media.src = url; }).catch(() => {
+        media.classList.add('asset-error'); media.title = `Media not found: ${source}`;
+      });
+    });
+    $$('a[href]', content).forEach(link => {
+      const source = link.getAttribute('href');
+      if (!source || /^[a-z]+:/i.test(source) || source.startsWith('#')) return;
+      if (!NotdGraph.resolveAssetPath(source, fromFolder).startsWith('assets/')) return;
+      link.dataset.graphAsset = source; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      graphStore.assetUrl(source, fromFolder).then(url => {
+        if (link.isConnected) { link.href = url; link.dataset.graphAssetReady = 'true'; }
+      }).catch(() => { link.classList.add('asset-error'); link.title = `Attachment not found: ${source}`; });
+    });
+  }
+
   function graphContentElement(block, page = state.graphPage) {
     const content = document.createElement('div');
     content.className = 'graph-block-content';
     content.dataset.blockId = block.id; content.dataset.pagePath = page?.path || '';
     content.innerHTML = graphDisplayContent(block);
-    if (graphStore && page) {
-      const fromFolder = page.path?.includes('/') ? page.path.split('/').slice(0, -1).join('/') : (page.folder || '');
-      $$('img, audio, video', content).forEach(media => {
-        const source = media.getAttribute('src');
-        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, fromFolder).then(url => { if (media.isConnected) media.src = url; }).catch(() => {
-          media.classList.add('asset-error'); media.title = `Media not found: ${source}`;
-        });
-      });
-      $$('a[href]', content).forEach(link => {
-        const source = link.getAttribute('href');
-        if (!source || /^[a-z]+:/i.test(source) || source.startsWith('#')) return;
-        if (!NotdGraph.resolveAssetPath(source, fromFolder).startsWith('assets/')) return;
-        link.dataset.graphAsset = source; link.target = '_blank'; link.rel = 'noopener noreferrer';
-        graphStore.assetUrl(source, fromFolder).then(url => {
-          if (link.isConnected) { link.href = url; link.dataset.graphAssetReady = 'true'; }
-        }).catch(() => { link.classList.add('asset-error'); link.title = `Attachment not found: ${source}`; });
-      });
-    }
+    resolveGraphContentAssets(content, page);
     return content;
   }
 
@@ -1594,17 +1597,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const timestamp = creationTimestamp(page);
       return timestamp ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(timestamp) : '';
     };
-    const referenceSnippet = content => {
-      const value = content.replace(/^\s*[\w-]+::.*$/gm, '').trim().slice(0, 220);
-      let html = ''; let offset = 0;
-      for (const match of value.matchAll(/\[\[([^\]]+?)\]\]/g)) {
-        html += escapeHtml(value.slice(offset, match.index));
-        const [page, alias] = match[1].split('|');
-        html += `<span class="backlink-mark">${escapeHtml((alias || page).trim())}</span>`;
-        offset = match.index + match[0].length;
-      }
-      return html + escapeHtml(value.slice(offset));
-    };
+    const referenceSnippet = item => graphDisplayContent(item.block);
     const renderGroups = (items, limit = false) => {
       const groups = new Map();
       items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
@@ -1615,7 +1608,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const visible = limit ? ordered.slice(0, 5) : ordered;
       const rows = visible.map(([title, group]) => {
         const date = creationDate(group[0].page);
-        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<button class="reference-result" data-reference-page="${escapeHtml(title)}" data-reference-block="${escapeHtml(item.block.id)}">${referenceSnippet(item.content)}</button>`).join('')}</div>`;
+        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<div class="reference-result" role="button" tabindex="0" data-reference-page="${escapeHtml(title)}" data-reference-page-path="${escapeHtml(item.page.path)}" data-reference-block="${escapeHtml(item.block.id)}">${referenceSnippet(item)}</div>`).join('')}</div>`;
       }).join('');
       return rows + (limit && ordered.length > 5 ? `<button class="references-more" type="button" data-show-all-references>Show all references · ${ordered.length}</button>` : '');
     };
@@ -1628,6 +1621,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     const blockLinked = blockUuid ? graphIndex.referencesToBlock(blockUuid) : [];
     const unlinked = includeUnlinked ? graphIndex.unlinkedReferences(pageTitle) : [];
     references.innerHTML = `<details${linked.length ? ' open' : ''}><summary>Linked references · ${linked.length}</summary>${renderGroups(linked, !state.referencesExpanded)}</details>${blockUuid ? `<details${blockLinked.length ? ' open' : ''}><summary>Block references · ${blockLinked.length}</summary>${renderGroups(blockLinked)}</details>` : ''}${includeUnlinked ? `<details${unlinked.length ? ' open' : ''}><summary>Unlinked references · ${unlinked.length}</summary>${renderGroups(unlinked)}</details>` : '<button class="unlinked-button" data-show-unlinked>Find unlinked references</button>'}`;
+    $$('.reference-result[data-reference-page-path]', references).forEach(result => {
+      const page = graphStore.pages.find(item => item.path === result.dataset.referencePagePath);
+      resolveGraphContentAssets(result, page);
+    });
   }
 
   function graphMutationFocus(block, position = null) { graphChanged(); focusGraphBlock(block.id, position); }
@@ -3662,7 +3659,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   const taskControlInfo = control => control?.matches('[data-task-checkbox-page]')
     ? { pagePath: control.dataset.taskCheckboxPage, blockId: control.dataset.taskCheckboxBlock }
     : control?.matches('[data-task-block]')
-      ? { pagePath: control.closest('.block-node, .on-this-day-item')?.dataset.pagePath || state.graphPage?.path, blockId: control.dataset.taskBlock }
+      ? { pagePath: control.closest('.block-node, .on-this-day-item')?.dataset.pagePath || control.closest('.reference-result')?.dataset.referencePagePath || state.graphPage?.path, blockId: control.dataset.taskBlock }
       : null;
   const cancelTaskLongPress = () => { clearTimeout(taskLongPressTimer); taskLongPressTimer = null; taskLongPressStart = null; };
   outliner.addEventListener('pointerdown', event => {
@@ -3690,6 +3687,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (node?.dataset.pagePath === state.graphPage?.path && event.target.closest('.block-row')) event.preventDefault();
   });
   outliner.addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.reference-result')) { event.preventDefault(); event.target.click(); return; }
     if (shortcutMatches('blockEscape', event) && selectedGraphBlockIds.size) { event.preventDefault(); clearGraphBlockSelection(); return; }
     if (shortcutMatches('blockDelete', event) && selectedGraphBlockIds.size) { event.preventDefault(); deleteSelectedGraphBlocks(); }
   });
@@ -3703,7 +3701,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const scheduledDate = event.target.closest('[data-scheduled-block]');
     if (scheduledDate) {
       event.preventDefault(); event.stopPropagation();
-      const pagePath = scheduledDate.dataset.scheduledPage || scheduledDate.closest('.block-node, .on-this-day-item')?.dataset.pagePath;
+      const pagePath = scheduledDate.dataset.scheduledPage || scheduledDate.closest('.block-node, .on-this-day-item, .reference-result')?.dataset.pagePath || scheduledDate.closest('.reference-result')?.dataset.referencePagePath;
       const blockId = scheduledDate.dataset.scheduledBlock; const initialDate = `${scheduledDate.dataset.scheduledDate}T12:00:00`;
       toggleJournalCalendar(date => updateScheduledDate(pagePath, blockId, date).catch(error => toast(error.message || 'Could not update the scheduled date')), scheduledDate.getBoundingClientRect(), initialDate);
       return;
@@ -3751,7 +3749,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     const journalHeading = event.target.closest('[data-journal-page]');
     if (journalHeading) { openSingleJournalPage(journalHeading.dataset.journalPage); return; }
     if (event.target.closest('[data-journal-more]')) { state.journalLimit += 8; renderGraphPage(); return; }
-    const blockNode = event.target.closest('.block-node, .on-this-day-item'); const pagePath = blockNode?.dataset.pagePath;
+    const blockNode = event.target.closest('.block-node, .on-this-day-item');
+    const pagePath = blockNode?.dataset.pagePath || event.target.closest('.reference-result')?.dataset.referencePagePath;
     const task = event.target.closest('[data-task-block]');
     if (task) {
       if (Date.now() < suppressTaskClickUntil) return;
@@ -3775,7 +3774,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       return;
     }
     const reference = event.target.closest('[data-reference-page]');
-    if (reference) { loadGraphPage(reference.dataset.referencePage, { blockId: reference.dataset.referenceBlock }); return; }
+    if (reference && !event.target.closest('button,a,audio,video,iframe')) { loadGraphPage(reference.dataset.referencePage, { blockId: reference.dataset.referenceBlock }); return; }
     if (event.target.closest('[data-show-unlinked]')) { renderReferences(true); return; }
     if (event.target.closest('[data-show-all-references]')) {
       state.referencesExpanded = true; renderReferences(!references.querySelector('[data-show-unlinked]')); return;
