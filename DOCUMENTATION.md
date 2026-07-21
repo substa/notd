@@ -325,11 +325,14 @@ When running through `server.py`:
 
 ## Assets
 
-Use `/upload` inside a graph block to select any file. notd stores it in the graph root’s `assets/` directory, preserves the original name when available, and inserts a Markdown link; images use image Markdown automatically. If a filename already exists, notd appends `-1`, `-2`, and so on.
+Use `/upload` inside a graph block to select any file. notd stores it in the graph root’s `assets/` directory, preserves the original name when available, and inserts a Markdown link; images, audio, and video use image Markdown automatically. Audio and video references written with `![](...)` are shown as native players. Trusted iframe embeds from YouTube, Vimeo, Spotify, and SoundCloud are also rendered. If a filename already exists, notd appends `-1`, `-2`, and so on.
 
 ```markdown
 ![Photo](/assets/photo.png)
+![Recording](../assets/recording.mp3)
+![Video](../assets/video.mp4)
 [Report](/assets/report.pdf)
+<iframe width="560" height="315" src="https://www.youtube.com/embed/cD2rQM2QP9w" title="YouTube video player" allowfullscreen></iframe>
 ```
 
 Removing a link or its block does not delete the file. Run **Clean orphaned assets** from the command palette later to review and delete unreferenced uploads. The command displays the candidate filenames and requires confirmation. In LAN mode, assets are served by the graph API.

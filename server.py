@@ -33,7 +33,12 @@ STATIC_FILES = {
     "/favicon-32x32.png", "/apple-touch-icon.png", "/icon-192.png", "/icon-512.png",
     "/icon-maskable-512.png", "/sw.js",
 }
-SAFE_INLINE_ASSET_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+SAFE_INLINE_ASSET_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+    "audio/mpeg", "audio/mp4", "audio/mp4a-latm", "audio/ogg", "audio/wav", "audio/x-wav",
+    "audio/aac", "audio/x-aac", "audio/flac", "audio/x-flac",
+    "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-m4v",
+}
 
 
 class EventBroker:
@@ -159,7 +164,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https: http:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https: http:; media-src 'self' blob: https: http:; frame-src https://youtu.be https://youtube.com https://*.youtube.com https://youtube-nocookie.com https://*.youtube-nocookie.com https://player.vimeo.com https://open.spotify.com https://w.soundcloud.com; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
         super().end_headers()
 
     def valid_write_origin(self) -> bool:
@@ -221,6 +226,49 @@ class NotdHandler(SimpleHTTPRequestHandler):
         if markdown_only and target.suffix.lower() not in MARKDOWN_SUFFIXES:
             raise ValueError("Only Markdown files can be modified")
         return target
+
+    def send_asset(self, target: Path) -> None:
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        inline = content_type in SAFE_INLINE_ASSET_TYPES
+        size = target.stat().st_size
+        start, end = 0, max(0, size - 1)
+        byte_range = self.headers.get("Range", "")
+        partial = False
+        if byte_range:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", byte_range.strip())
+            if not match or (not match.group(1) and not match.group(2)):
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            if match.group(1):
+                start = int(match.group(1)); end = min(int(match.group(2) or end), end)
+            else:
+                suffix = int(match.group(2)); start = max(0, size - suffix)
+            if start >= size or start > end:
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            partial = True
+        length = end - start + 1 if size else 0
+        self.send_response(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK)
+        self.send_header("Content-Type", content_type if inline else "application/octet-stream")
+        self.send_header("Content-Disposition", "inline" if inline else f"attachment; filename={json.dumps(target.name)}")
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Content-Length", str(length))
+        self.end_headers()
+        with target.open("rb") as source:
+            source.seek(start)
+            remaining = length
+            while remaining:
+                chunk = source.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def git_context(self, target: Path) -> tuple[Path | None, str | None, str | None]:
         try:
@@ -330,16 +378,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 target = self.graph_path(unquote(parsed.path.lstrip("/")))
                 if not target.is_file():
                     raise FileNotFoundError(parsed.path)
-                content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-                inline = content_type in SAFE_INLINE_ASSET_TYPES
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", content_type if inline else "application/octet-stream")
-                self.send_header("Content-Disposition", "inline" if inline else f"attachment; filename={json.dumps(target.name)}")
-                self.send_header("Content-Length", str(target.stat().st_size))
-                self.end_headers()
-                with target.open("rb") as source:
-                    while chunk := source.read(64 * 1024):
-                        self.wfile.write(chunk)
+                self.send_asset(target)
                 return
             except (ValueError, OSError):
                 return self.error_json(HTTPStatus.NOT_FOUND, "Asset not found")
@@ -451,16 +490,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 target = self.graph_path(raw_path)
                 if not target.is_file():
                     raise FileNotFoundError(raw_path)
-                content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-                inline = content_type in SAFE_INLINE_ASSET_TYPES
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", content_type if inline else "application/octet-stream")
-                self.send_header("Content-Disposition", "inline" if inline else f"attachment; filename={json.dumps(target.name)}")
-                self.send_header("Content-Length", str(target.stat().st_size))
-                self.end_headers()
-                with target.open("rb") as source:
-                    while chunk := source.read(64 * 1024):
-                        self.wfile.write(chunk)
+                self.send_asset(target)
                 return
             self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         except FileNotFoundError:

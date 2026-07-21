@@ -200,10 +200,36 @@ Open, save, export, and reach recent documents or headings from the command pale
     return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(decoded) || !/^[a-z][a-z0-9+.-]*:/i.test(decoded) ? escapeHtml(decoded) : '#';
   }
 
-  function isPdfReference(url) {
+  function referenceExtension(url) {
     let decoded = String(url || '').replace(/&amp;/g, '&').split(/[?#]/)[0];
     try { decoded = decodeURIComponent(decoded); } catch {}
-    return /\.pdf$/i.test(decoded);
+    return decoded.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() || '';
+  }
+
+  function isPdfReference(url) { return referenceExtension(url) === 'pdf'; }
+
+  function mediaReferenceType(url) {
+    const extension = referenceExtension(url);
+    if (['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus'].includes(extension)) return 'audio';
+    if (['mp4', 'webm', 'ogv', 'mov', 'm4v'].includes(extension)) return 'video';
+    return '';
+  }
+
+  function safeIframeEmbed(markup) {
+    const template = document.createElement('template'); template.innerHTML = markup;
+    const iframe = template.content.firstElementChild;
+    if (!iframe || iframe.tagName !== 'IFRAME') return '';
+    let source;
+    try { source = new URL(iframe.getAttribute('src') || ''); } catch { return ''; }
+    const host = source.hostname.toLowerCase();
+    const trusted = host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com') ||
+      host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com') || host === 'player.vimeo.com' ||
+      host === 'open.spotify.com' || host === 'w.soundcloud.com';
+    if (source.protocol !== 'https:' || !trusted) return '';
+    const dimension = (name, fallback) => /^\d{1,4}$|^100%$/.test(iframe.getAttribute(name) || '') ? iframe.getAttribute(name) : fallback;
+    const title = iframe.getAttribute('title') || 'Embedded media';
+    const allow = iframe.getAttribute('allow');
+    return `<iframe class="media-frame" width="${dimension('width', '560')}" height="${dimension('height', '315')}" src="${escapeHtml(source.href)}" title="${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer"${allow ? ` allow="${escapeHtml(allow)}"` : ''}${iframe.hasAttribute('allowfullscreen') ? ' allowfullscreen' : ''}></iframe>`;
   }
 
   const syntaxKeywords = {
@@ -303,16 +329,24 @@ Open, save, export, and reach recent documents or headings from the command pale
   function orgQuoteClosing(line = '') { return /^\s*#\+END_QUOTE\s*$/i.test(line); }
 
   function inlineMarkdown(text) {
-    let value = escapeHtml(text);
-    const code = []; const links = [];
+    const code = []; const links = []; const embeds = [];
+    let raw = String(text).replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe\s*>/gi, markup => {
+      const iframe = safeIframeEmbed(markup);
+      if (!iframe) return markup;
+      embeds.push(iframe); return `\u0000EMBED${embeds.length - 1}\u0000`;
+    });
+    let value = escapeHtml(raw);
     value = value.replace(/`([^`]+)`/g, (_, content) => {
       code.push(`<code>${content}</code>`);
       return `\u0000CODE${code.length - 1}\u0000`;
     });
     value = value.replace(/!\[([^\]]*)\]\(([^\s)]+)(?:\s+["']([^"']*)["'])?\)/g,
       (_, alt, url, title) => {
+        const mediaType = mediaReferenceType(url);
         if (isPdfReference(url)) {
           links.push(`<a href="${safeUrl(url)}"${title ? ` title="${title}"` : ''} rel="noopener noreferrer" referrerpolicy="no-referrer">${alt || 'PDF'}</a>`);
+        } else if (mediaType) {
+          links.push(`<${mediaType} class="media-embed" src="${safeUrl(url)}" controls preload="metadata" data-embed-label="${alt}"${title ? ` title="${title}"` : ''}>${escapeHtml(alt || `Your browser does not support ${mediaType}.`)}</${mediaType}>`);
         } else {
           links.push(`<img src="${safeUrl(url)}" alt="${alt}"${title ? ` title="${title}"` : ''} loading="lazy" decoding="async" referrerpolicy="no-referrer">`);
         }
@@ -330,6 +364,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     value = value.replace(/ {2}$/g, '<br>');
     value = value.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)]);
     value = value.replace(/\u0000LINK(\d+)\u0000/g, (_, index) => links[Number(index)]);
+    value = value.replace(/\u0000EMBED(\d+)\u0000/g, (_, index) => embeds[Number(index)]);
     return value;
   }
 
@@ -440,6 +475,13 @@ Open, save, export, and reach recent documents or headings from the command pale
       case 'CODE': return node.parentElement?.tagName === 'PRE' ? inner : `\`${inner}\``;
       case 'A': return `[${inner}](${node.getAttribute('href') || ''}${node.title ? ` "${node.title}"` : ''})`;
       case 'IMG': return `![${node.alt || ''}](${node.getAttribute('src') || ''}${node.title ? ` "${node.title}"` : ''})`;
+      case 'AUDIO': case 'VIDEO': return `![${node.dataset.embedLabel || ''}](${node.getAttribute('src') || ''}${node.title ? ` "${node.title}"` : ''})`;
+      case 'IFRAME': {
+        const attributes = [`width="${node.getAttribute('width') || '560'}"`, `height="${node.getAttribute('height') || '315'}"`, `src="${node.getAttribute('src') || ''}"`, `title="${node.title || 'Embedded media'}"`];
+        if (node.getAttribute('allow')) attributes.push(`allow="${node.getAttribute('allow')}"`);
+        if (node.hasAttribute('allowfullscreen')) attributes.push('allowfullscreen');
+        return `<iframe ${attributes.join(' ')}></iframe>`;
+      }
       case 'BR': return '  \n';
       default: return inner;
     }
@@ -653,10 +695,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     content.innerHTML = graphDisplayContent(block);
     if (graphStore && page) {
       const fromFolder = page.path?.includes('/') ? page.path.split('/').slice(0, -1).join('/') : (page.folder || '');
-      $$('img', content).forEach(image => {
-        const source = image.getAttribute('src');
-        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, fromFolder).then(url => { if (image.isConnected) image.src = url; }).catch(() => {
-          image.classList.add('asset-error'); image.title = `Image not found: ${source}`;
+      $$('img, audio, video', content).forEach(media => {
+        const source = media.getAttribute('src');
+        if (source && !/^[a-z]+:/i.test(source)) graphStore.assetUrl(source, fromFolder).then(url => { if (media.isConnected) media.src = url; }).catch(() => {
+          media.classList.add('asset-error'); media.title = `Media not found: ${source}`;
         });
       });
       $$('a[href]', content).forEach(link => {
@@ -2900,7 +2942,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   function exportHtml() {
     const body = markdownToHtml(currentMarkdown());
     const title = escapeHtml(fileName.value || 'Document');
-    const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{max-width:760px;margin:60px auto;padding:0 24px;color:#333;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}h1{border-bottom:1px solid #ddd}a{color:#4183c4}blockquote{border-left:3px solid #ddd;padding-left:18px;color:#777}code,pre{font-family:monospace;background:#f5f5f5;border-radius:4px}code{padding:2px 4px}pre{padding:16px;overflow:auto}pre code{padding:0}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:7px}img{max-width:100%}</style><body>${body}</body></html>`;
+    const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{max-width:760px;margin:60px auto;padding:0 24px;color:#333;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}h1{border-bottom:1px solid #ddd}a{color:#4183c4}blockquote{border-left:3px solid #ddd;padding-left:18px;color:#777}code,pre{font-family:monospace;background:#f5f5f5;border-radius:4px}code{padding:2px 4px}pre{padding:16px;overflow:auto}pre code{padding:0}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:7px}img,video,iframe{max-width:100%}audio{width:100%}iframe{border:0}</style><body>${body}</body></html>`;
     downloadBlob(page, `${fileName.value || 'document'}.html`, 'text/html'); toast('HTML exported');
   }
 
@@ -3534,7 +3576,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     try {
       const path = await graphStore.writeAsset(file);
       const label = file.name.replace(/[\[\]]/g, '');
-      const markdown = file.type.startsWith('image/') ? `![${label}](${path})` : `[${label}](${path})`;
+      const markdown = /^(?:image|audio|video)\//.test(file.type) ? `![${label}](${path})` : `[${label}](${path})`;
       if (target.field.isConnected) {
         target.field.setRangeText(markdown, target.start, target.end, 'end');
         target.field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' })); target.field.focus();
@@ -3605,7 +3647,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
   });
   editor.addEventListener('pointerdown', event => {
-    if (state.sourceMode || event.target.matches('input[type="checkbox"]') || activeSourceBlock?.contains(event.target)) return;
+    if (state.sourceMode || event.target.matches('input[type="checkbox"]') || event.target.closest('audio,video,iframe') || activeSourceBlock?.contains(event.target)) return;
     let block = event.target;
     while (block && block.parentElement !== editor) block = block.parentElement;
     if (!block || block === editor) { commitActiveBlock(); return; }
@@ -3752,7 +3794,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       return;
     }
     const content = event.target.closest('.graph-block-content');
-    if (content && !event.target.closest('button,a')) {
+    if (content && !event.target.closest('button,a,audio,video,iframe')) {
       if (state.journalMode && content.dataset.pagePath !== state.graphPage.path) activateJournalBlock(content.dataset.pagePath, content.dataset.blockId);
       else activateGraphBlock(graphBlockLocation(content.dataset.blockId)?.block);
     }
