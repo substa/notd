@@ -49,6 +49,7 @@
   const saveState = $("#saveState");
   const STORAGE_KEY = "notd-markdown-documents-v1";
   const SETTINGS_KEY = "notd-markdown-settings-v1";
+  const TASK_COMPLETIONS_KEY = "notd-task-completions-v1";
   const localSettings = () => {
     try {
       return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
@@ -81,6 +82,9 @@
     onThisDayExpanded: false,
     onThisDayEmptyDismissed: false,
     taskView: null,
+    taskSummaryIds: [],
+    taskCompletedTodayIds: [],
+    taskCompletedDate: "",
     taskLimits: {},
     taskExpanded: {},
   };
@@ -1320,6 +1324,38 @@ Open, save, export, and reach recent documents or headings from the command pale
     return NotdGraph.formatJournalDate(date, "yyyy-MM-dd");
   }
 
+  function taskCompletedTodayIds() {
+    const today = taskDate();
+    if (state.taskCompletedDate === today)
+      return state.taskCompletedTodayIds;
+    state.taskCompletedDate = today;
+    state.taskCompletedTodayIds = [];
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(
+          `${TASK_COMPLETIONS_KEY}:${graphStore?.name || "default"}`,
+        ),
+      );
+      if (saved?.date === today && Array.isArray(saved.ids))
+        state.taskCompletedTodayIds = saved.ids.filter(
+          (id) => typeof id === "string",
+        );
+    } catch {}
+    return state.taskCompletedTodayIds;
+  }
+
+  function saveTaskCompletedTodayIds() {
+    try {
+      localStorage.setItem(
+        `${TASK_COMPLETIONS_KEY}:${graphStore?.name || "default"}`,
+        JSON.stringify({
+          date: state.taskCompletedDate,
+          ids: state.taskCompletedTodayIds,
+        }),
+      );
+    } catch {}
+  }
+
   function taskGroups(tasks = graphTasks()) {
     const today = taskDate();
     const week = taskDate(7);
@@ -1353,22 +1389,20 @@ Open, save, export, and reach recent documents or headings from the command pale
     };
   }
 
+  const taskId = (task) => `${task.page.path}:${task.block.id}`;
+  const taskPersistenceId = (task) =>
+    `${task.page.path}:${task.block.uuid || task.block.content.replace(/^[A-Z]+(?:\s+|$)/, "").trim()}`;
+
   function uniqueTasks(...groups) {
     return [
-      ...new Map(
-        groups
-          .flat()
-          .map((task) => [`${task.page.path}:${task.block.id}`, task]),
-      ).values(),
+      ...new Map(groups.flat().map((task) => [taskId(task), task])).values(),
     ];
   }
 
   function taskOverviewGroups(groups = taskGroups()) {
-    const progressIds = new Set(
-      groups.progress.map((task) => `${task.page.path}:${task.block.id}`),
-    );
-    const today = uniqueTasks(groups.overdue, groups.today).filter(
-      (task) => !progressIds.has(`${task.page.path}:${task.block.id}`),
+    const progressIds = new Set(groups.progress.map(taskId));
+    const today = uniqueTasks(groups.overdue, groups.today).filter((task) =>
+      !progressIds.has(taskId(task)),
     );
     return { today, progress: groups.progress };
   }
@@ -1386,7 +1420,7 @@ Open, save, export, and reach recent documents or headings from the command pale
           .map((task) => {
             const overdue =
               !task.done && task.scheduled && task.scheduled < today;
-            return `<div class="task-dashboard-item"><button type="button" class="task-dashboard-state task-dashboard-state-${task.done ? "done" : task.progress ? "doing" : "todo"}" data-task-checkbox-page="${escapeHtml(task.page.path)}" data-task-checkbox-block="${escapeHtml(task.block.id)}" aria-label="Task status: ${escapeHtml(task.marker)}. Click to complete; Shift-click or hold to mark in progress" title="${escapeHtml(task.marker)} · click to complete · Shift-click or hold for DOING"></button><button type="button" class="task-dashboard-item-main" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span>${overdue ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ""}${escapeHtml(task.text || "Untitled task")}</span>${task.scheduled ? `<time class="graph-scheduled" data-scheduled-page="${escapeHtml(task.page.path)}" data-scheduled-block="${escapeHtml(task.block.id)}" data-scheduled-date="${escapeHtml(task.scheduled)}" title="Edit scheduled date"><span class="graph-scheduled-icon" aria-hidden="true"></span>${escapeHtml(task.scheduled)}</time>` : ""}</button></div>`;
+            return `<div class="task-dashboard-item${task.done ? " task-dashboard-item-done" : ""}"><button type="button" class="task-dashboard-state task-dashboard-state-${task.done ? "done" : task.progress ? "doing" : "todo"}" data-task-checkbox-page="${escapeHtml(task.page.path)}" data-task-checkbox-block="${escapeHtml(task.block.id)}" aria-label="Task status: ${escapeHtml(task.marker)}. Click to complete; Shift-click or hold to mark in progress" title="${escapeHtml(task.marker)} · click to complete · Shift-click or hold for DOING"></button><button type="button" class="task-dashboard-item-main" data-task-page="${escapeHtml(task.page.path)}" data-task-block-id="${escapeHtml(task.block.id)}"><span>${overdue ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ""}${escapeHtml(task.text || "Untitled task")}</span>${task.scheduled ? `<time class="graph-scheduled" data-scheduled-page="${escapeHtml(task.page.path)}" data-scheduled-block="${escapeHtml(task.block.id)}" data-scheduled-date="${escapeHtml(task.scheduled)}" title="Edit scheduled date"><span class="graph-scheduled-icon" aria-hidden="true"></span>${escapeHtml(task.scheduled)}</time>` : ""}</button></div>`;
           })
           .join("")
       : '<p class="task-dashboard-empty">No tasks</p>';
@@ -1536,6 +1570,23 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function journalTaskPanelElement() {
     const overview = taskOverviewGroups();
+    taskCompletedTodayIds();
+    const retainedIds = new Set([
+      ...state.taskSummaryIds,
+      ...state.taskCompletedTodayIds,
+    ]);
+    const completed = graphTasks().filter(
+      (task) => task.done && retainedIds.has(taskPersistenceId(task)),
+    );
+    const initialOrder = new Map(
+      state.taskSummaryIds.map((id, index) => [id, index]),
+    );
+    overview.today = uniqueTasks(overview.today, completed).sort(
+      (left, right) =>
+        (initialOrder.get(taskPersistenceId(left)) ?? Number.MAX_SAFE_INTEGER) -
+        (initialOrder.get(taskPersistenceId(right)) ??
+          Number.MAX_SAFE_INTEGER),
+    );
     const panel = document.createElement("section");
     panel.className = "journal-task-panel";
     const sections = [
@@ -2445,6 +2496,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       graphSettings = null;
       taskUndoStack.length = 0;
       taskRedoStack.length = 0;
+      state.taskCompletedTodayIds = [];
+      state.taskCompletedDate = "";
       await loadGraphSettings();
       const pages = await graphStore.scan();
       graphIndex = new NotdGraph.GraphIndex(pages);
@@ -2687,6 +2740,25 @@ Open, save, export, and reach recent documents or headings from the command pale
         throw error;
       }
     }
+    const scheduled =
+      originalContent.match(
+        /^\s*(?:SCHEDULED|DEADLINE):\s*<(\d{4}-\d{2}-\d{2})\b[^>]*>/m,
+      )?.[1] || "";
+    const id = taskPersistenceId({ page, block });
+    const today = taskDate();
+    taskCompletedTodayIds();
+    const belongedToToday =
+      (scheduled && scheduled <= today) ||
+      (!scheduled && page.journalDate === today);
+    if (next === "DONE" && belongedToToday) {
+      if (!state.taskCompletedTodayIds.includes(id))
+        state.taskCompletedTodayIds.push(id);
+    } else if (next !== "DONE") {
+      state.taskCompletedTodayIds = state.taskCompletedTodayIds.filter(
+        (item) => item !== id,
+      );
+    }
+    saveTaskCompletedTodayIds();
     recordTaskHistory(
       page.path,
       block.id,
@@ -2779,6 +2851,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     state.graphZoomId = null;
     state.journalMode = false;
     state.taskView = null;
+    state.taskCompletedTodayIds = [];
+    state.taskCompletedDate = "";
     journalDocuments.clear();
     graphHistory = [];
     graphHistoryIndex = -1;
@@ -7203,7 +7277,15 @@ Open, save, export, and reach recent documents or headings from the command pale
       return;
     }
     if (event.target.closest("[data-open-task-view]")) {
-      state.taskView = state.taskView === "summary" ? null : "summary";
+      if (state.taskView === "summary") {
+        state.taskView = null;
+        state.taskSummaryIds = [];
+      } else {
+        state.taskView = "summary";
+        state.taskSummaryIds = taskOverviewGroups().today.map(
+          taskPersistenceId,
+        );
+      }
       renderGraphPage();
       return;
     }

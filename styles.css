@@ -2440,6 +2440,13 @@ svg {
   color: inherit;
   text-align: left;
 }
+.journal-task-panel .task-dashboard-item-done .task-dashboard-item-main {
+  color: var(--muted);
+}
+.journal-task-panel .task-dashboard-item-done .task-dashboard-item-main > span {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
 .task-dashboard-item-updating .task-dashboard-item-main {
   opacity: 0.2;
 }
@@ -3120,8 +3127,9 @@ svg {
     max-width: 25vw;
     padding: 0 5px;
   }
-  .block-children {
-    margin-left: 26px;
+  .block-children,
+  .context-block-children {
+    margin-left: 15px;
   }
   .journal-heading {
     font-size: 28px;
