@@ -10,7 +10,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY server.py index.html app.js graph.js styles.css theme-config.css sw.js ./
-COPY manifest.webmanifest ./
+COPY manifest.webmanifest apple-touch-icon.png ./
 COPY docs/ ./docs/
 COPY assets/icons/ ./assets/icons/
 

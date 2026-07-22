@@ -1,4 +1,4 @@
-const CACHE = "notd-editor-v10";
+const CACHE = "notd-editor-v11";
 const ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const ASSETS = [
   "./docs/user-guide.md",
   "./docs/deployment.md",
   "./manifest.webmanifest",
+  "./apple-touch-icon.png",
   "./assets/icons/favicon.ico",
   "./assets/icons/favicon-16x16.png",
   "./assets/icons/favicon-32x32.png",

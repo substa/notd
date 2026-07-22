@@ -29,7 +29,7 @@ MAX_GRAPH_FILES = 20_000
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 STATIC_FILES = {
     "/", "/index.html", "/styles.css", "/theme-config.css", "/graph.js", "/app.js",
-    "/docs/user-guide.md", "/docs/deployment.md", "/manifest.webmanifest", "/assets/icons/favicon.ico",
+    "/docs/user-guide.md", "/docs/deployment.md", "/manifest.webmanifest", "/apple-touch-icon.png", "/assets/icons/favicon.ico",
     "/assets/icons/favicon-16x16.png", "/assets/icons/favicon-32x32.png",
     "/assets/icons/apple-touch-icon.png", "/assets/icons/icon-192.png",
     "/assets/icons/icon-512.png", "/assets/icons/icon-maskable-512.png", "/sw.js",
