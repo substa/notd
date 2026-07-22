@@ -204,7 +204,7 @@ The copied reference has this form:
 
 ### Linked references
 
-Single pages show references grouped by source page. The source title and all matching blocks share one card. Reference groups are always ordered from the most recent source page to the oldest. For journals, the date displayed in the page title is authoritative; the filename-derived date is used only when the title cannot be parsed. This keeps imported journals correctly ordered when their filenames contain different dates. Other pages use `created-at::`, `created::`, or the file modification date. Unlinked references are available on demand, while block references are shown when a referenced block is zoomed.
+Single pages show references grouped by source page. The source title and all matching blocks share one card. Blocks with nested content can be expanded directly inside linked, block, and unlinked references. Reference groups are always ordered from the most recent source page to the oldest. For journals, the date displayed in the page title is authoritative; the filename-derived date is used only when the title cannot be parsed. This keeps imported journals correctly ordered when their filenames contain different dates. Other pages use `created-at::`, `created::`, or the file modification date. Unlinked references are available on demand, while block references are shown when a referenced block is zoomed.
 
 ## Journals
 
@@ -225,7 +225,7 @@ When a graph is opened for the first time, notd imports these compatible setting
 
 The imported values are written to `.notd/settings.json`, which then becomes notd's source of truth. The original Logseq configuration is left unchanged, so an existing graph can be imported safely and subsequently managed by notd on every device.
 
-Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page. When previous-year entries exist and today's journal is empty, its first empty block is shown below the title and task count, followed by the **on this day** timeline. The timeline moves to a collapsible link at the bottom of today's entry as soon as the empty block receives focus. The timeline includes all top-level blocks created on the same month and day in previous years; blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline.
+Previous journal pages appear below today's entry and load progressively while scrolling. Click a journal title to open that date as a single page. When previous-year entries exist and today's journal is empty, its first empty block is shown below the title and task count, followed by the **on this day** timeline. The timeline moves to a collapsible link at the bottom of today's entry as soon as the empty block receives focus. The timeline includes all top-level blocks created on the same month and day in previous years; blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline. Timeline blocks with nested content can be expanded in place.
 
 ### Journal commands
 

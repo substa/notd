@@ -796,6 +796,32 @@ Open, save, export, and reach recent documents or headings from the command pale
     }).join('') : '<p class="task-dashboard-empty">No tasks</p>';
   }
 
+  function graphContextBlockElement(block, page, variant) {
+    const node = document.createElement('div');
+    node.className = `context-block-node${block.children.length ? ' has-children collapsed' : ''}`;
+    node.dataset.contextBlockId = block.id;
+    const row = document.createElement('div'); row.className = 'context-block-row';
+    if (block.children.length) {
+      const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'context-block-toggle';
+      toggle.dataset.contextBlockToggle = ''; toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-label', 'Expand nested blocks');
+      row.append(toggle);
+    } else {
+      const spacer = document.createElement('span'); spacer.className = 'context-block-toggle-spacer'; row.append(spacer);
+    }
+    if (variant === 'on-this-day') {
+      const point = document.createElement('button'); point.type = 'button'; point.className = 'context-block-point on-this-day-point';
+      point.dataset.onThisDayPage = page.path; point.dataset.onThisDayBlock = block.id; point.setAttribute('aria-label', `Open ${page.title}`); row.append(point);
+    } else {
+      const point = document.createElement('span'); point.className = 'context-block-point'; row.append(point);
+    }
+    const content = graphContentElement(block, page); content.classList.add(`${variant}-content`); row.append(content); node.append(row);
+    if (block.children.length) {
+      const children = document.createElement('div'); children.className = 'context-block-children';
+      block.children.forEach(child => children.append(graphContextBlockElement(child, page, variant))); node.append(children);
+    }
+    return node;
+  }
+
   function onThisDayPages(date = new Date()) {
     const monthDay = NotdGraph.formatJournalDate(date, 'MM-dd');
     const currentYear = date.getFullYear();
@@ -826,10 +852,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const year = document.createElement('button'); year.type = 'button'; year.className = 'on-this-day-year-link'; year.dataset.journalPage = page.path; year.textContent = page.journalDate.slice(0, 4); group.append(year);
       for (const block of blocks) {
         const item = document.createElement('article'); item.className = 'on-this-day-item'; item.dataset.pagePath = page.path;
-        const point = document.createElement('button'); point.type = 'button'; point.className = 'on-this-day-point';
-        point.dataset.onThisDayPage = page.path; point.dataset.onThisDayBlock = block.id; point.setAttribute('aria-label', `Open ${page.title}`);
-        const content = graphContentElement(block, page); content.classList.add('on-this-day-content');
-        item.append(point, content); group.append(item);
+        item.append(graphContextBlockElement(block, page, 'on-this-day')); group.append(item);
       }
       list.append(group);
     }
@@ -1597,7 +1620,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const timestamp = creationTimestamp(page);
       return timestamp ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(timestamp) : '';
     };
-    const referenceSnippet = item => graphDisplayContent(item.block);
+    const referenceSnippet = item => graphContextBlockElement(item.block, item.page, 'reference').outerHTML;
     const renderGroups = (items, limit = false) => {
       const groups = new Map();
       items.forEach(item => { if (!groups.has(item.page.title)) groups.set(item.page.title, []); groups.get(item.page.title).push(item); });
@@ -1608,7 +1631,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       const visible = limit ? ordered.slice(0, 5) : ordered;
       const rows = visible.map(([title, group]) => {
         const date = creationDate(group[0].page);
-        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<div class="reference-result" role="button" tabindex="0" data-reference-page="${escapeHtml(title)}" data-reference-page-path="${escapeHtml(item.page.path)}" data-reference-block="${escapeHtml(item.block.id)}">${referenceSnippet(item)}</div>`).join('')}</div>`;
+        return `<div class="reference-group"><div class="reference-page-row"><button class="reference-page graph-page-ref" data-page="${escapeHtml(title)}">${escapeHtml(title)}</button><span class="reference-leader" aria-hidden="true"></span>${date ? `<time class="reference-date">${escapeHtml(date)}</time>` : ''}</div>${group.map(item => `<div class="reference-result has-context-tree" role="button" tabindex="0" data-reference-page="${escapeHtml(title)}" data-reference-page-path="${escapeHtml(item.page.path)}" data-reference-block="${escapeHtml(item.block.id)}">${referenceSnippet(item)}</div>`).join('')}</div>`;
       }).join('');
       return rows + (limit && ordered.length > 5 ? `<button class="references-more" type="button" data-show-all-references>Show all references · ${ordered.length}</button>` : '');
     };
@@ -3774,12 +3797,22 @@ Open, save, export, and reach recent documents or headings from the command pale
       return;
     }
     const reference = event.target.closest('[data-reference-page]');
-    if (reference && !event.target.closest('button,a,audio,video,iframe')) { loadGraphPage(reference.dataset.referencePage, { blockId: reference.dataset.referenceBlock }); return; }
+    if (reference && !event.target.closest('button,a,audio,video,iframe')) {
+      const contextBlock = event.target.closest('[data-context-block-id]');
+      loadGraphPage(reference.dataset.referencePage, { blockId: contextBlock?.dataset.contextBlockId || reference.dataset.referenceBlock }); return;
+    }
     if (event.target.closest('[data-show-unlinked]')) { renderReferences(true); return; }
     if (event.target.closest('[data-show-all-references]')) {
       state.referencesExpanded = true; renderReferences(!references.querySelector('[data-show-unlinked]')); return;
     }
     if (event.target.closest('[data-clear-zoom]')) { state.graphZoomId = null; renderGraphPage(); return; }
+    const contextToggle = event.target.closest('[data-context-block-toggle]');
+    if (contextToggle) {
+      const node = contextToggle.closest('.context-block-node'); const collapsed = node.classList.toggle('collapsed');
+      contextToggle.setAttribute('aria-expanded', String(!collapsed));
+      contextToggle.setAttribute('aria-label', collapsed ? 'Expand nested blocks' : 'Collapse nested blocks');
+      return;
+    }
     const toggle = event.target.closest('[data-block-toggle]');
     if (toggle) {
       if (state.journalMode && pagePath && pagePath !== state.graphPage.path) activateJournalBlock(pagePath, toggle.dataset.blockToggle, 'toggle');
