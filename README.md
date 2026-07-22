@@ -141,9 +141,10 @@ Run the JavaScript tests with:
 node --test tests/*.test.js
 ```
 
-Check the Python server with:
+Run the server tests and syntax check with:
 
 ```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
 python3 -m py_compile server.py
 ```
 

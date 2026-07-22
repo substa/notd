@@ -228,6 +228,15 @@ class NotdHandler(SimpleHTTPRequestHandler):
             raise ValueError("Only Markdown files can be modified")
         return target
 
+    def graph_asset_path(self, raw_path: str) -> Path:
+        relative = PurePosixPath(unquote(raw_path))
+        if len(relative.parts) < 2 or relative.parts[0] != "assets":
+            raise ValueError("Assets must be stored in assets/")
+        target = self.graph_path(relative.as_posix())
+        assert self.graph
+        target.relative_to((self.graph / "assets").resolve())
+        return target
+
     def send_asset(self, target: Path) -> None:
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         inline = content_type in SAFE_INLINE_ASSET_TYPES
@@ -376,7 +385,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path.startswith("/assets/") and self.graph:
             try:
-                target = self.graph_path(unquote(parsed.path.lstrip("/")))
+                target = self.graph_asset_path(parsed.path.lstrip("/"))
                 if not target.is_file():
                     raise FileNotFoundError(parsed.path)
                 self.send_asset(target)
@@ -488,7 +497,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 diff = result.stdout[:limit] + ("\n… diff truncated …\n" if truncated else "")
                 return self.json_response({"available": True, "diff": diff, "truncated": truncated})
             if parsed.path == "/api/graph/asset":
-                target = self.graph_path(raw_path)
+                target = self.graph_asset_path(raw_path)
                 if not target.is_file():
                     raise FileNotFoundError(raw_path)
                 self.send_asset(target)
@@ -575,9 +584,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
             try:
                 raw_path = parse_qs(parsed.query).get("path", [""])[0]
-                if not raw_path.startswith("assets/"):
-                    raise ValueError("Assets must be stored in assets/")
-                target = self.graph_path(raw_path)
+                target = self.graph_asset_path(raw_path)
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                 except ValueError as error:
@@ -640,9 +647,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
             return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         try:
             raw_path = parse_qs(parsed.query).get("path", [""])[0]
-            if not raw_path.startswith("assets/"):
-                raise ValueError("Assets must be stored in assets/")
-            target = self.graph_path(raw_path)
+            target = self.graph_asset_path(raw_path)
             with self.server.mutation_lock:  # type: ignore[attr-defined]
                 if not target.is_file():
                     raise FileNotFoundError(raw_path)
