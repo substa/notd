@@ -136,3 +136,7 @@ For internet access, use authentication and TLS at a reverse proxy, keep the Pyt
 ## Scope
 
 notd is maintained as a focused personal tool rather than a general-purpose knowledge platform. Features that add persistent interface complexity, broad configuration surfaces, plugin systems, or hosted dependencies may be outside its intended scope.
+
+## License
+
+notd is released under the [MIT License](LICENSE).
