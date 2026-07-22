@@ -10,9 +10,9 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY server.py index.html app.js graph.js styles.css theme-config.css sw.js ./
-COPY DOCUMENTATION.md DEPLOYMENT.md manifest.webmanifest ./
-COPY favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png ./
-COPY icon-192.png icon-512.png icon-maskable-512.png ./
+COPY manifest.webmanifest ./
+COPY docs/ ./docs/
+COPY assets/icons/ ./assets/icons/
 
 EXPOSE 4176
 

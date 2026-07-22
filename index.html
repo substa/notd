@@ -1,187 +1,615 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#fdfcfb">
-  <meta name="description" content="A minimal, fast, local Markdown editor.">
-  <meta name="referrer" content="no-referrer">
-  <title>notd — Markdown editor</title>
-  <base href="/">
-  <link rel="icon" href="favicon.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest">
-  <meta name="apple-mobile-web-app-title" content="notd">
-  <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="theme-config.css">
-</head>
-<body>
-  <div id="app" class="app">
-    <header class="titlebar">
-      <div class="document-title">
-        <input id="fileName" value="Untitled" aria-label="Document name" spellcheck="false">
-        <div id="documentTitleActions" class="document-title-actions" hidden>
-          <button id="saveTitleButton" type="button" aria-label="Save page title" title="Save title">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#fdfcfb" />
+    <meta
+      name="description"
+      content="A minimal, fast, local Markdown editor."
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>notd — Markdown editor</title>
+    <base href="/" />
+    <link rel="icon" href="assets/icons/favicon.ico" sizes="any" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="assets/icons/favicon-32x32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="assets/icons/favicon-16x16.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="assets/icons/apple-touch-icon.png"
+    />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="notd" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="theme-config.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header class="titlebar">
+        <div class="document-title">
+          <input
+            id="fileName"
+            value="Untitled"
+            aria-label="Document name"
+            spellcheck="false"
+          />
+          <div id="documentTitleActions" class="document-title-actions" hidden>
+            <button
+              id="saveTitleButton"
+              type="button"
+              aria-label="Save page title"
+              title="Save title"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 12 4 4 10-10" />
+              </svg>
+            </button>
+            <button
+              id="deletePageButton"
+              type="button"
+              aria-label="Delete page"
+              title="Delete page"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+              </svg>
+            </button>
+          </div>
+          <span
+            id="dirtyDot"
+            class="dirty-dot"
+            aria-label="Unsaved changes"
+          ></span>
+        </div>
+        <div class="title-actions">
+          <button
+            class="title-action"
+            id="todayJournalButton"
+            type="button"
+            aria-label="Go to today's journal"
+            title="Today's journal (⌘/Ctrl + Shift + J)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m4 11 8-7 8 7M6.5 9.5V20h11V9.5M10 20v-6h4v6" />
+            </svg>
           </button>
-          <button id="deletePageButton" type="button" aria-label="Delete page" title="Delete page">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+          <button
+            class="title-action"
+            id="journalCalendarButton"
+            type="button"
+            aria-label="Open journal calendar"
+            aria-expanded="false"
+            aria-controls="journalCalendar"
+            title="Open journal calendar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="5" width="16" height="15" rx="2" />
+              <path
+                d="M8 3v4M16 3v4M4 9h16M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01"
+              />
+            </svg>
+          </button>
+          <div
+            id="journalCalendar"
+            class="journal-calendar"
+            role="dialog"
+            aria-label="Choose journal date"
+            hidden
+          >
+            <header>
+              <button
+                type="button"
+                data-calendar-move="-1"
+                aria-label="Previous month"
+              >
+                ‹</button
+              ><strong id="calendarMonth"></strong
+              ><button
+                type="button"
+                data-calendar-move="1"
+                aria-label="Next month"
+              >
+                ›
+              </button>
+            </header>
+            <div class="calendar-weekdays" aria-hidden="true">
+              <span>Mo</span><span>Tu</span><span>We</span><span>Th</span
+              ><span>Fr</span><span>Sa</span><span>Su</span>
+            </div>
+            <div id="calendarDays" class="calendar-days"></div>
+            <div id="calendarTasks" class="calendar-tasks"></div>
+          </div>
+          <button
+            class="command-button"
+            id="commandButton"
+            aria-label="Search commands and pages"
+            aria-keyshortcuts="Control+K Meta+K"
+            title="Search (⌘/Ctrl + K)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m15.5 15.5 4.5 4.5" />
+            </svg>
           </button>
         </div>
-        <span id="dirtyDot" class="dirty-dot" aria-label="Unsaved changes"></span>
-      </div>
-      <div class="title-actions">
-        <button class="title-action" id="todayJournalButton" type="button" aria-label="Go to today's journal" title="Today's journal (⌘/Ctrl + Shift + J)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-7 8 7M6.5 9.5V20h11V9.5M10 20v-6h4v6"/></svg>
-        </button>
-        <button class="title-action" id="journalCalendarButton" type="button" aria-label="Open journal calendar" aria-expanded="false" aria-controls="journalCalendar" title="Open journal calendar">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 9h16M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01"/></svg>
-        </button>
-        <div id="journalCalendar" class="journal-calendar" role="dialog" aria-label="Choose journal date" hidden>
-          <header><button type="button" data-calendar-move="-1" aria-label="Previous month">‹</button><strong id="calendarMonth"></strong><button type="button" data-calendar-move="1" aria-label="Next month">›</button></header>
-          <div class="calendar-weekdays" aria-hidden="true"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
-          <div id="calendarDays" class="calendar-days"></div>
-          <div id="calendarTasks" class="calendar-tasks"></div>
-        </div>
-        <button class="command-button" id="commandButton" aria-label="Search commands and pages" aria-keyshortcuts="Control+K Meta+K" title="Search (⌘/Ctrl + K)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg>
-        </button>
-      </div>
-    </header>
-
-    <main class="workspace">
-      <div class="findbar" id="findbar" hidden>
-        <svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
-        <input id="findInput" type="search" placeholder="Find in document" aria-label="Find">
-        <button id="findPrev" aria-label="Previous">↑</button><button id="findNext" aria-label="Next">↓</button>
-        <button id="findClose" aria-label="Close">×</button>
-      </div>
-
-      <div class="notd-wrap" id="notdWrap">
-        <article id="editor" class="editor" contenteditable="true" spellcheck="true" aria-label="Editor Markdown"></article>
-        <article id="outliner" class="outliner" tabindex="-1" aria-label="Graph outliner" hidden>
-          <nav id="zoomBreadcrumb" class="zoom-breadcrumb" aria-label="Block breadcrumb" hidden></nav>
-          <div id="pagePreamble" class="page-preamble" hidden></div>
-          <div id="blockTree" class="block-tree"></div>
-          <button id="addBlock" class="add-block" type="button">Add block</button>
-          <nav id="pageHierarchy" class="page-hierarchy" aria-label="Page hierarchy" hidden></nav>
-          <section id="references" class="references"></section>
-        </article>
-        <textarea id="sourceEditor" class="source-editor" spellcheck="false" aria-label="Markdown source" hidden></textarea>
-      </div>
-
-      <footer class="statusbar"><span id="vimStatus" class="vim-status" hidden>-- NORMAL --</span><span id="saveState">Ready</span><span id="wordCount">0 words</span><button id="footerMenuButton" class="footer-menu-button" type="button" aria-label="Open page menu" aria-expanded="false" aria-controls="footerMenu" title="Page menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg></button></footer>
-    </main>
-
-    <div id="footerMenu" class="footer-menu" role="menu" hidden><button type="button" role="menuitem" data-footer-action="new-page">New page</button><button type="button" role="menuitem" data-footer-action="delete-page">Delete page</button><button type="button" role="menuitem" data-footer-action="page-history">Page history</button><hr><button type="button" role="menuitem" data-footer-action="settings">Settings</button><button type="button" role="menuitem" data-footer-action="shortcuts">Shortcuts</button><button type="button" role="menuitem" data-footer-action="documentation">Documentation</button></div>
-
-    <section id="pageHistoryView" class="page-history-view" aria-label="Page history" hidden>
-      <header class="page-history-header"><strong>notd · Page history</strong><button id="pageHistoryClose" type="button" aria-label="Close page history">×</button></header>
-      <main class="page-history-main"><h1 id="pageHistoryTitle">Page history</h1><div id="pageHistoryContent" class="page-history-content"></div></main>
-    </section>
-
-    <div class="dialog-backdrop" id="confirmDialog" hidden>
-      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
-        <h2 id="dialogTitle">Unsaved changes</h2>
-        <p>Do you want to save this document before continuing?</p>
-        <div><button data-dialog="cancel">Cancel</button><button data-dialog="discard">Don’t save</button><button class="primary" data-dialog="save">Save</button></div>
-      </div>
-    </div>
-
-    <div class="dialog-backdrop" id="deleteConfirmDialog" hidden>
-      <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="deleteDialogTitle" aria-describedby="deleteDialogMessage">
-        <h2 id="deleteDialogTitle">Delete page?</h2>
-        <p id="deleteDialogMessage"></p>
-        <div><button type="button" data-delete-dialog="cancel">Cancel</button><button type="button" class="danger" data-delete-dialog="confirm">Delete</button></div>
-      </div>
-    </div>
-
-    <div class="command-backdrop" id="commandPalette" hidden>
-      <div class="command-palette" role="dialog" aria-modal="true" aria-label="Commands">
-        <div class="command-search">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
-          <input id="commandInput" type="text" placeholder="Search commands and pages…" autocomplete="off" spellcheck="false" aria-label="Search commands, pages, and blocks">
-        </div>
-        <section id="createPageSection" class="command-section command-section-create" aria-label="Create page" hidden>
-          <div id="createPageList" class="command-list" role="listbox"></div>
-        </section>
-        <section id="pageResultSection" class="command-section command-section-recent" data-command-section="pages" aria-labelledby="recentHeading">
-          <header class="command-section-header">
-            <h3 id="recentHeading" class="command-section-title">Recent pages</h3>
-            <button type="button" data-command-section-more="pages" tabindex="-1" aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown" title="Show more (Ctrl/Cmd + ↓)" hidden>show more</button>
-          </header>
-          <div id="recentPageList" class="command-list" role="listbox"></div>
-        </section>
-        <section id="commandResultSection" class="command-section command-section-main" data-command-section="commands" aria-labelledby="commandsHeading">
-          <header class="command-section-header">
-            <h3 id="commandsHeading" class="command-section-title">Commands</h3>
-            <button type="button" data-command-section-more="commands" tabindex="-1" aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown" title="Show more (Ctrl/Cmd + ↓)" hidden>show more</button>
-          </header>
-          <div id="commandList" class="command-list" role="listbox"></div>
-        </section>
-        <section id="blockResultSection" class="command-section command-section-blocks" data-command-section="blocks" aria-labelledby="blocksHeading" hidden>
-          <header class="command-section-header">
-            <h3 id="blocksHeading" class="command-section-title">Blocks</h3>
-            <button type="button" data-command-section-more="blocks" tabindex="-1" aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown" title="Show more (Ctrl/Cmd + ↓)" hidden>show more</button>
-          </header>
-          <div id="blockResultList" class="command-list" role="listbox"></div>
-        </section>
-        <footer id="commandPaletteStats" class="command-palette-stats" hidden>
-          <strong id="paletteGraphName"></strong>
-          <span id="paletteGraphFiles"></span>
-          <span id="paletteGraphModified"></span>
-          <span id="paletteGraphSize"></span>
-        </footer>
-      </div>
-    </div>
-    <section id="settingsView" class="settings-view" aria-label="Settings" hidden>
-      <header class="settings-header">
-        <strong>notd · Settings</strong>
-        <button id="settingsClose" type="button" aria-label="Close settings">×</button>
       </header>
-      <div class="settings-layout">
-        <nav class="settings-nav" aria-label="Settings sections">
-          <button type="button" data-settings-tab="general">General</button>
-          <button type="button" data-settings-tab="shortcuts">Shortcuts</button>
-          <button type="button" data-settings-tab="documentation">Documentation</button>
-        </nav>
-        <main class="settings-main">
-          <section class="settings-panel settings-general" data-settings-panel="general">
-            <h1>General</h1>
-            <label class="settings-field"><span><strong>Theme</strong><small>Choose the interface appearance.</small></span><select id="settingsTheme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-            <label class="settings-field"><span><strong>Accent color</strong><small>Used for links, focus and active controls.</small></span><input id="settingsAccent" type="color" value="#3f7fba"></label>
-            <label class="settings-field"><span><strong>Vim mode</strong><small>Enable Normal and Insert editing modes.</small></span><input id="settingsVim" type="checkbox" role="switch"></label>
-          </section>
-          <section class="settings-panel settings-shortcuts" data-settings-panel="shortcuts" hidden>
-            <header><div><h1>Shortcuts</h1><p>Click a shortcut, then press a new key combination.</p></div><input id="shortcutSearch" type="search" placeholder="Search shortcuts…" aria-label="Search shortcuts"></header>
-            <div id="shortcutList"></div>
-          </section>
-          <section class="settings-panel settings-documentation" data-settings-panel="documentation" hidden>
-            <nav id="documentationMenu" class="documentation-menu" aria-label="Documentation sections"></nav>
-            <article id="documentationContent" class="editor documentation-content"></article>
-          </section>
-        </main>
+
+      <main class="workspace">
+        <div class="findbar" id="findbar" hidden>
+          <svg viewBox="0 0 24 24">
+            <circle cx="10" cy="10" r="6" />
+            <path d="m15 15 5 5" />
+          </svg>
+          <input
+            id="findInput"
+            type="search"
+            placeholder="Find in document"
+            aria-label="Find"
+          />
+          <button id="findPrev" aria-label="Previous">↑</button
+          ><button id="findNext" aria-label="Next">↓</button>
+          <button id="findClose" aria-label="Close">×</button>
+        </div>
+
+        <div class="notd-wrap" id="notdWrap">
+          <article
+            id="editor"
+            class="editor"
+            contenteditable="true"
+            spellcheck="true"
+            aria-label="Editor Markdown"
+          ></article>
+          <article
+            id="outliner"
+            class="outliner"
+            tabindex="-1"
+            aria-label="Graph outliner"
+            hidden
+          >
+            <nav
+              id="zoomBreadcrumb"
+              class="zoom-breadcrumb"
+              aria-label="Block breadcrumb"
+              hidden
+            ></nav>
+            <div id="pagePreamble" class="page-preamble" hidden></div>
+            <div id="blockTree" class="block-tree"></div>
+            <button id="addBlock" class="add-block" type="button">
+              Add block
+            </button>
+            <nav
+              id="pageHierarchy"
+              class="page-hierarchy"
+              aria-label="Page hierarchy"
+              hidden
+            ></nav>
+            <section id="references" class="references"></section>
+          </article>
+          <textarea
+            id="sourceEditor"
+            class="source-editor"
+            spellcheck="false"
+            aria-label="Markdown source"
+            hidden
+          ></textarea>
+        </div>
+
+        <footer class="statusbar">
+          <span id="vimStatus" class="vim-status" hidden>-- NORMAL --</span
+          ><span id="saveState">Ready</span><span id="wordCount">0 words</span
+          ><button
+            id="footerMenuButton"
+            class="footer-menu-button"
+            type="button"
+            aria-label="Open page menu"
+            aria-expanded="false"
+            aria-controls="footerMenu"
+            title="Page menu"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"
+              />
+            </svg>
+          </button>
+        </footer>
+      </main>
+
+      <div id="footerMenu" class="footer-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-footer-action="new-page">
+          New page</button
+        ><button type="button" role="menuitem" data-footer-action="delete-page">
+          Delete page</button
+        ><button
+          type="button"
+          role="menuitem"
+          data-footer-action="page-history"
+        >
+          Page history
+        </button>
+        <hr />
+        <button type="button" role="menuitem" data-footer-action="settings">
+          Settings</button
+        ><button type="button" role="menuitem" data-footer-action="shortcuts">
+          Shortcuts</button
+        ><button
+          type="button"
+          role="menuitem"
+          data-footer-action="documentation"
+        >
+          Documentation
+        </button>
       </div>
-    </section>
-    <div id="graphAutocomplete" class="graph-autocomplete" role="listbox" hidden></div>
-    <div id="mobileBlockToolbar" class="mobile-block-toolbar" role="toolbar" aria-label="Block actions" hidden>
-      <button type="button" data-block-action="outdent" aria-label="Decrease indentation" title="Decrease indentation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6h9M11 12h9M11 18h9M8 9l-3 3 3 3"/></svg></button>
-      <button type="button" data-block-action="indent" aria-label="Increase indentation" title="Increase indentation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6h9M11 12h9M11 18h9M5 9l3 3-3 3"/></svg></button>
-      <button type="button" data-block-action="up" aria-label="Move block up" title="Move block up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M7 10l5-5 5 5"/></svg></button>
-      <button type="button" data-block-action="down" aria-label="Move block down" title="Move block down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M7 14l5 5 5-5"/></svg></button>
-      <button type="button" data-block-action="undo" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6"/></svg></button>
-      <button type="button" data-block-action="redo" aria-label="Redo" title="Redo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6"/></svg></button>
-      <button type="button" data-block-action="square" aria-label="Insert page reference brackets" title="Insert [[ ]]"><span aria-hidden="true">[]</span></button>
-      <button type="button" data-block-action="round" aria-label="Insert block reference parentheses" title="Insert (( ))"><span aria-hidden="true">()</span></button>
+
+      <section
+        id="pageHistoryView"
+        class="page-history-view"
+        aria-label="Page history"
+        hidden
+      >
+        <header class="page-history-header">
+          <strong>notd · Page history</strong
+          ><button
+            id="pageHistoryClose"
+            type="button"
+            aria-label="Close page history"
+          >
+            ×
+          </button>
+        </header>
+        <main class="page-history-main">
+          <h1 id="pageHistoryTitle">Page history</h1>
+          <div id="pageHistoryContent" class="page-history-content"></div>
+        </main>
+      </section>
+
+      <div class="dialog-backdrop" id="confirmDialog" hidden>
+        <div
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dialogTitle"
+        >
+          <h2 id="dialogTitle">Unsaved changes</h2>
+          <p>Do you want to save this document before continuing?</p>
+          <div>
+            <button data-dialog="cancel">Cancel</button
+            ><button data-dialog="discard">Don’t save</button
+            ><button class="primary" data-dialog="save">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-backdrop" id="deleteConfirmDialog" hidden>
+        <div
+          class="dialog"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="deleteDialogTitle"
+          aria-describedby="deleteDialogMessage"
+        >
+          <h2 id="deleteDialogTitle">Delete page?</h2>
+          <p id="deleteDialogMessage"></p>
+          <div>
+            <button type="button" data-delete-dialog="cancel">Cancel</button
+            ><button type="button" class="danger" data-delete-dialog="confirm">
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="command-backdrop" id="commandPalette" hidden>
+        <div
+          class="command-palette"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Commands"
+        >
+          <div class="command-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10" cy="10" r="6" />
+              <path d="m15 15 5 5" />
+            </svg>
+            <input
+              id="commandInput"
+              type="text"
+              placeholder="Search commands and pages…"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Search commands, pages, and blocks"
+            />
+          </div>
+          <section
+            id="createPageSection"
+            class="command-section command-section-create"
+            aria-label="Create page"
+            hidden
+          >
+            <div id="createPageList" class="command-list" role="listbox"></div>
+          </section>
+          <section
+            id="pageResultSection"
+            class="command-section command-section-recent"
+            data-command-section="pages"
+            aria-labelledby="recentHeading"
+          >
+            <header class="command-section-header">
+              <h3 id="recentHeading" class="command-section-title">
+                Recent pages
+              </h3>
+              <button
+                type="button"
+                data-command-section-more="pages"
+                tabindex="-1"
+                aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown"
+                title="Show more (Ctrl/Cmd + ↓)"
+                hidden
+              >
+                show more
+              </button>
+            </header>
+            <div id="recentPageList" class="command-list" role="listbox"></div>
+          </section>
+          <section
+            id="commandResultSection"
+            class="command-section command-section-main"
+            data-command-section="commands"
+            aria-labelledby="commandsHeading"
+          >
+            <header class="command-section-header">
+              <h3 id="commandsHeading" class="command-section-title">
+                Commands
+              </h3>
+              <button
+                type="button"
+                data-command-section-more="commands"
+                tabindex="-1"
+                aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown"
+                title="Show more (Ctrl/Cmd + ↓)"
+                hidden
+              >
+                show more
+              </button>
+            </header>
+            <div id="commandList" class="command-list" role="listbox"></div>
+          </section>
+          <section
+            id="blockResultSection"
+            class="command-section command-section-blocks"
+            data-command-section="blocks"
+            aria-labelledby="blocksHeading"
+            hidden
+          >
+            <header class="command-section-header">
+              <h3 id="blocksHeading" class="command-section-title">Blocks</h3>
+              <button
+                type="button"
+                data-command-section-more="blocks"
+                tabindex="-1"
+                aria-keyshortcuts="Control+ArrowDown Meta+ArrowDown"
+                title="Show more (Ctrl/Cmd + ↓)"
+                hidden
+              >
+                show more
+              </button>
+            </header>
+            <div id="blockResultList" class="command-list" role="listbox"></div>
+          </section>
+          <footer id="commandPaletteStats" class="command-palette-stats" hidden>
+            <strong id="paletteGraphName"></strong>
+            <span id="paletteGraphFiles"></span>
+            <span id="paletteGraphModified"></span>
+            <span id="paletteGraphSize"></span>
+          </footer>
+        </div>
+      </div>
+      <section
+        id="settingsView"
+        class="settings-view"
+        aria-label="Settings"
+        hidden
+      >
+        <header class="settings-header">
+          <strong>notd · Settings</strong>
+          <button id="settingsClose" type="button" aria-label="Close settings">
+            ×
+          </button>
+        </header>
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="Settings sections">
+            <button type="button" data-settings-tab="general">General</button>
+            <button type="button" data-settings-tab="shortcuts">
+              Shortcuts
+            </button>
+            <button type="button" data-settings-tab="documentation">
+              Documentation
+            </button>
+          </nav>
+          <main class="settings-main">
+            <section
+              class="settings-panel settings-general"
+              data-settings-panel="general"
+            >
+              <h1>General</h1>
+              <label class="settings-field"
+                ><span
+                  ><strong>Theme</strong
+                  ><small>Choose the interface appearance.</small></span
+                ><select id="settingsTheme">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select></label
+              >
+              <label class="settings-field"
+                ><span
+                  ><strong>Accent color</strong
+                  ><small
+                    >Used for links, focus and active controls.</small
+                  ></span
+                ><input id="settingsAccent" type="color" value="#3f7fba"
+              /></label>
+              <label class="settings-field"
+                ><span
+                  ><strong>Vim mode</strong
+                  ><small>Enable Normal and Insert editing modes.</small></span
+                ><input id="settingsVim" type="checkbox" role="switch"
+              /></label>
+            </section>
+            <section
+              class="settings-panel settings-shortcuts"
+              data-settings-panel="shortcuts"
+              hidden
+            >
+              <header>
+                <div>
+                  <h1>Shortcuts</h1>
+                  <p>Click a shortcut, then press a new key combination.</p>
+                </div>
+                <input
+                  id="shortcutSearch"
+                  type="search"
+                  placeholder="Search shortcuts…"
+                  aria-label="Search shortcuts"
+                />
+              </header>
+              <div id="shortcutList"></div>
+            </section>
+            <section
+              class="settings-panel settings-documentation"
+              data-settings-panel="documentation"
+              hidden
+            >
+              <nav
+                id="documentationMenu"
+                class="documentation-menu"
+                aria-label="Documentation sections"
+              ></nav>
+              <article
+                id="documentationContent"
+                class="editor documentation-content"
+              ></article>
+            </section>
+          </main>
+        </div>
+      </section>
+      <div
+        id="graphAutocomplete"
+        class="graph-autocomplete"
+        role="listbox"
+        hidden
+      ></div>
+      <div
+        id="mobileBlockToolbar"
+        class="mobile-block-toolbar"
+        role="toolbar"
+        aria-label="Block actions"
+        hidden
+      >
+        <button
+          type="button"
+          data-block-action="outdent"
+          aria-label="Decrease indentation"
+          title="Decrease indentation"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M11 6h9M11 12h9M11 18h9M8 9l-3 3 3 3" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-block-action="indent"
+          aria-label="Increase indentation"
+          title="Increase indentation"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M11 6h9M11 12h9M11 18h9M5 9l3 3-3 3" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-block-action="up"
+          aria-label="Move block up"
+          title="Move block up"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 19V5M7 10l5-5 5 5" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-block-action="down"
+          aria-label="Move block down"
+          title="Move block down"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14M7 14l5 5 5-5" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-block-action="undo"
+          aria-label="Undo"
+          title="Undo"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-block-action="redo"
+          aria-label="Redo"
+          title="Redo"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-block-action="square"
+          aria-label="Insert page reference brackets"
+          title="Insert [[ ]]"
+        >
+          <span aria-hidden="true">[]</span>
+        </button>
+        <button
+          type="button"
+          data-block-action="round"
+          aria-label="Insert block reference parentheses"
+          title="Insert (( ))"
+        >
+          <span aria-hidden="true">()</span>
+        </button>
+      </div>
+      <div id="toast" class="toast" role="status"></div>
+      <input
+        id="fileInput"
+        type="file"
+        accept=".md,.markdown,.txt,text/markdown,text/plain"
+        hidden
+      />
+      <input id="assetInput" type="file" hidden />
     </div>
-    <div id="toast" class="toast" role="status"></div>
-    <input id="fileInput" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
-    <input id="assetInput" type="file" hidden>
-  </div>
-  <noscript>This application requires JavaScript.</noscript>
-  <script src="graph.js"></script>
-  <script src="app.js"></script>
-</body>
+    <noscript>This application requires JavaScript.</noscript>
+    <script src="graph.js"></script>
+    <script src="app.js"></script>
+  </body>
 </html>

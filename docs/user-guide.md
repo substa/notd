@@ -47,7 +47,7 @@ Open notd while online, close it completely, and launch it again. The Service Wo
 
 ### Docker and Pangolin
 
-The repository includes `Dockerfile`, `compose.yaml`, `.env.example`, and a complete [Docker and Pangolin deployment guide](./DEPLOYMENT.md). The container exposes notd only on server loopback for diagnostics and on a private Docker network shared with Newt. Pangolin must require authentication before forwarding traffic to `http://notd:4176`; never expose the writable Python API directly to the internet.
+The repository includes `Dockerfile`, `compose.yaml`, `.env.example`, and a complete [Docker and Pangolin deployment guide](./deployment.md). The container exposes notd only on server loopback for diagnostics and on a private Docker network shared with Newt. Pangolin must require authentication before forwarding traffic to `http://notd:4176`; never expose the writable Python API directly to the internet.
 
 ## Command palette
 
@@ -406,7 +406,7 @@ Open the PWA while connected and keep it in the foreground. iOS does not provide
 
 ### Documentation appears outdated
 
-Documentation is fetched without using the browser HTTP cache. Restart the PWA to activate the newest Service Worker if this guide still differs from the deployed `DOCUMENTATION.md` file.
+Documentation is fetched without using the browser HTTP cache. Restart the PWA to activate the newest Service Worker if this guide still differs from the deployed `docs/user-guide.md` file.
 
 ## Privacy and security
 

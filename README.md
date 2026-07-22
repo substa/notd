@@ -1,8 +1,36 @@
 # notd
 
-A minimal, framework-free Markdown editor and local-first outliner. It can edit individual documents or open a Logseq-style graph directly from the user’s filesystem; no content is sent to external services.
+notd is a local-first Markdown editor and Logseq-compatible outliner that runs without a framework, build step, or external service. It supports standalone documents, filesystem-backed graphs, daily journals, references, tasks, attachments, offline use, and an optional server for sharing one graph across trusted devices.
 
-## Run locally
+notd is deliberately very opinionated. It was created for a specific personal workflow and favors an ultraminimal interface, strong defaults, and very few options. That constraint is intentional: the project is unlikely to suit everyone, especially anyone looking for extensive customization, plugins, or collaborative editing.
+
+## Principles
+
+- Markdown files remain the source of truth.
+- Local operation is the default.
+- The interface stays quiet and exposes controls only when needed.
+- Features are added for a concrete workflow rather than broad configurability.
+- The application remains understandable and deployable without a JavaScript toolchain.
+
+## Features
+
+- Visual Markdown editing with an optional full source view.
+- Standalone file opening, saving, downloading, search, outline, and HTML export.
+- Logseq-style graphs with pages, journals, nested blocks, zoom, collapse, and block selection.
+- `[[page references]]`, `((block references))`, linked references, unlinked references, and page hierarchy.
+- Task states, scheduled dates, task overview, and calendar navigation.
+- Journal history, previous entries, and an expandable “on this day” view.
+- Local attachments, images, audio, video, code blocks, quotes, tables, and common Markdown formatting.
+- Command palette, customizable keyboard shortcuts, and optional Vim navigation.
+- Light, dark, and system themes with a configurable accent color.
+- Offline PWA support and recovery drafts.
+- Optional graph server with atomic writes, conflict detection, offline queues, and live updates.
+
+The complete user guide is available in [docs/user-guide.md](docs/user-guide.md) and inside the application.
+
+## Quick start
+
+No dependencies or build step are required for the browser application.
 
 ```bash
 python3 -m http.server 4173
@@ -10,77 +38,101 @@ python3 -m http.server 4173
 
 Open [http://localhost:4173](http://localhost:4173).
 
-### Share one graph on the LAN
+The single-document editor works in current browsers. Direct graph access uses the File System Access API and works best in Chromium-based browsers.
 
-To serve the app together with a writable graph:
+## Working with a local graph
+
+Open the command palette and select **Open local graph**, then choose a Logseq-compatible directory. notd reads Markdown files at the graph root and in `pages/` and `journals/`. It also imports compatible journal date formats from `logseq/config.edn` on first use.
+
+Typical outliner controls include:
+
+- `Enter` to create a sibling block;
+- `Shift+Enter` to insert a line break;
+- `Tab` and `Shift+Tab` to change depth;
+- `Alt+Up` and `Alt+Down` to reorder blocks;
+- `Cmd/Ctrl+Enter` to cycle task states;
+- a bullet click to zoom into a block;
+- the arrow beside a bullet to collapse or expand its children.
+
+See the [user guide](docs/user-guide.md) for graph navigation, commands, tasks, attachments, settings, and keyboard shortcuts.
+
+## Sharing a graph
+
+The included Python server can expose the application and one writable graph:
 
 ```bash
 python3 server.py \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 4176 \
-  --graph /absolute/path/to/your/logseq-graph
+  --graph /absolute/path/to/graph
 ```
 
-Open `http://localhost:4176` on the host or `http://192.168.1.10:4176` from another device. The app detects the server graph automatically; every client reads and writes the same Markdown files. Server-Sent Events propagate saves immediately to the other clients, while a lightweight watcher detects edits made directly by Logseq within about one second. Autosave and conflict detection remain active.
+Open [http://localhost:4176](http://localhost:4176). To use another device on a trusted LAN, bind to `0.0.0.0` and connect through the host's private address.
 
-The graph API currently has no application authentication. Bind it beyond localhost only on a trusted, controlled LAN and do not expose it directly to the internet. Username/password authentication can be added before public deployment. The default host remains `127.0.0.1`.
+The graph API does not provide application-level authentication. Do not expose it directly to the public internet. Put an authenticated reverse proxy in front of it for remote access. The provided Docker configuration is designed for this model; see [docs/deployment.md](docs/deployment.md) for the Pangolin setup.
 
-The server still exposes only the application allowlist (not repository/source files), rejects cross-origin browser writes, applies restrictive browser security headers, limits request and graph-file sizes, uses atomic writes, and caches unchanged Markdown reads. API JSON responses are compressed when supported.
+## Privacy and storage
 
-Run the graph parser/index tests with:
+In standalone mode, document copies and preferences are stored in browser storage. In local graph mode, recovery drafts and the selected directory handle are stored in IndexedDB. Graph preferences are written to `.notd/settings.json` inside the graph.
+
+When the optional server is used, content is exchanged only with that server. Remote graph replicas and pending offline operations may remain in IndexedDB on each client. Markdown files always remain authoritative.
+
+No analytics, trackers, hosted fonts, or third-party content services are included. Embedded external media may contact its original host when opened.
+
+## Offline support
+
+notd installs as a Progressive Web App when served from HTTPS or localhost. The application shell is cached by the Service Worker. Server-backed graphs also keep a local replica and queue supported edits while offline, then synchronize after reconnection.
+
+After deploying an update, close and reopen the installed application so the latest Service Worker can take control.
+
+## Development
+
+The project intentionally uses browser JavaScript, CSS, HTML, and the Python standard library. There is no package installation step.
+
+Run the JavaScript tests with:
 
 ```bash
-node --test tests/graph.test.js
+node --test tests/*.test.js
 ```
 
-The app is entirely static and can be deployed to any HTTPS host, including GitHub Pages, Netlify, Vercel, or nginx. HTTPS enables the PWA and File System Access API in supported browsers.
+Check the Python server with:
 
-## Deploy with Docker and Pangolin
+```bash
+python3 -m py_compile server.py
+```
 
-A production-oriented Compose setup is included for running one writable graph behind Pangolin authentication. It uses a read-only container filesystem, host UID/GID mapping, a loopback-only diagnostic port, and a private Docker network shared with Newt.
+For a server-backed development session:
 
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for installation, Pangolin resource configuration, PWA setup, updates, backups, and troubleshooting.
+```bash
+python3 server.py --port 4176 --graph /absolute/path/to/graph
+```
 
-## Features
+## Project structure
 
-- distraction-free interface with files, recent documents, outline, themes, and tools collected in the command palette;
-- inline Markdown formatting (`**bold**`, `*italic*`, and `` `code` ``);
-- contextual block editing that reveals Markdown source and formats it again when focus moves away;
-- block navigation with arrow keys or `Alt + ↑/↓`;
-- optional persistent Vim mode with Normal/Insert modes, `h/j/k/l`, word and document motions, `Ctrl-D/U`, and undo/redo with `u` and `Ctrl-R`;
-- command palette split between commands and recent pages, with a shared search field, available with `⌘/Ctrl + K`, `F1`, or `⌘/Ctrl + Shift + P`;
-- searchable, sectioned, and customizable shortcuts for files, search, formatting, navigation, and blocks;
-- visual Markdown editing and full source mode;
-- headings, links, quotes, lists, tasks, code blocks, and tables;
-- file picker and drag-and-drop opening;
-- direct saving on Chromium and `.md` downloads on other browsers;
-- local copies and recent documents;
-- automatic outline, search, and word count;
-- light, dark, and system themes, with automatic system appearance updates;
-- HTML export;
-- desktop/mobile layouts and offline PWA support;
-- local graphs backed by `pages/`, `journals/`, and Markdown files;
-- automatic filesystem saves with IndexedDB recovery drafts and external-change detection;
-- offline server-graph replicas with queued page creation and edits that synchronize when the PWA reconnects;
-- nested blocks with keyboard indentation, reordering, collapse, zoom, and task cycling;
-- `[[page references]]`, page creation/autocomplete, `((block references))`, linked and unlinked references;
-- graph-wide page switching and block search from the command palette;
-- graph index resync and conservative orphaned-asset cleanup commands;
-- `/upload` attachments saved under the graph’s `assets/` directory;
-- `<quote` and `<src` inline commands for quickly inserting quotes and fenced code blocks;
-- clean, copyable client-side URLs such as `/pages/page-name` and `/journals/2026_07_18`, with browser back/forward navigation;
-- incremental in-browser index updates, avoiding a full graph reparse after each edit;
-- daily journals and safe page renaming with optional reference updates;
-- a settings view for theme, accent color, Vim mode, shortcuts, and complete built-in documentation.
+```text
+assets/icons/       Browser and PWA icons
+docs/               User and deployment documentation
+tests/              Graph parser and index tests
+app.js              Browser application and interface behavior
+graph.js            Markdown graph parser, index, and storage adapters
+index.html           Application markup
+styles.css           Core interface styles
+theme-config.css     Theme variables and editorial overrides
+server.py            Optional writable graph server
+sw.js                Offline application cache
+manifest.webmanifest PWA metadata
+Dockerfile           Container image
+compose.yaml         Hardened server deployment
+```
 
-## Privacy
+The root application files are served directly. Keeping them at the root avoids generated output and makes the static deployment path identical to the source tree.
 
-In direct local mode, no content is sent to a server. Automatic copies of standalone documents are stored in `localStorage`; graph recovery drafts, remote graph replicas, pending offline operations, and the selected directory handle are stored in IndexedDB. Graph preferences—including theme, Vim mode, collapsed blocks, recent pages, and journal formats—are stored in `.notd/settings.json` inside the graph, so they follow the same graph across devices. On first import, compatible journal formats are copied from `logseq/config.edn`; afterward `.notd/settings.json` is authoritative for notd. When `server.py --graph` is used, content is exchanged only with that notd server. The Markdown files in the selected or served graph remain the source of truth.
+## Deployment
 
-## Local graph support
+The static editor can be hosted on any HTTPS-capable static host. The writable graph server can run directly with Python or through the included Docker Compose configuration.
 
-Use **Open local graph** from the command palette and select a folder. notd reads Markdown files at the graph root and under `pages/` and `journals/`. The graph index is rebuilt locally and supports Logseq-style page and block references. In the outliner, use `Enter` to add a sibling, `Shift+Enter` for a line break, `Tab`/`Shift+Tab` to change depth, `Alt+↑/↓` to reorder, and `⌘/Ctrl+Enter` to cycle task states. Use `⌘/Ctrl+click` to select multiple blocks or `Shift+click` to select a visible range, then press `Backspace` to delete them. Click a bullet to zoom into it; use the small arrow to collapse or expand nested blocks.
+For internet access, use authentication and TLS at a reverse proxy, keep the Python service private, and back up the graph independently of the application. Detailed Docker, Pangolin, update, backup, and troubleshooting instructions are in [docs/deployment.md](docs/deployment.md).
 
-Opening a graph starts on today's Logseq-compatible journal. Existing journals are shown below it in reverse chronological order and loaded progressively while scrolling. In a block, type `/` to show inline commands: `/today`, `/yesterday`, and `/tomorrow` insert journal references, `/date picker` inserts a selected `[[page reference]]`, and `/upload` saves an attachment in `assets/` and inserts its Markdown link. Use **Sync all notes and backlinks** to force a full index rebuild after external changes. **Clean orphaned assets** lists unreferenced attachments and asks for confirmation before deleting them. Use `⌘/Ctrl+Shift+J` for today's journal and `Alt+←/→` to move backward or forward through page history. The journal filename and displayed date follow `:journal/file-name-format` and `:journal/page-title-format` from `logseq/config.edn` (default filename: `yyyy_MM_dd.md`).
+## Scope
 
-Direct directory access requires the File System Access API and currently works best in Chromium-based browsers. Other browsers can continue to use the single-document editor and download-based saving.
+notd is maintained as a focused personal tool rather than a general-purpose knowledge platform. Features that add persistent interface complexity, broad configuration surfaces, plugin systems, or hosted dependencies may be outside its intended scope.
