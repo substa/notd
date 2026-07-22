@@ -128,9 +128,29 @@ Use **Rename document** or `F2`, edit the title, then select the minimal checkma
 
 ### Page history
 
-When the server graph is inside a Git repository, choose **Page history** from the footer menu to display up to 100 commits for the current Markdown file. Each entry shows the short commit hash, subject, author, and date. Expand a commit to load and display its unified diff for that page; diffs are fetched only when requested. Added lines are highlighted in green, removed lines in red, hunk headers in cyan, and Git metadata with the same syntax palette used by code blocks. Rename history is followed when Git can detect it, and a notice appears when the working copy has uncommitted changes.
+Page history is available only when the graph directory is already a Git repository and notd is running through `server.py`. notd does not initialize the repository or create commits automatically: the history contains only snapshots committed by the user or by external backup automation.
 
-The browser cannot inspect Git repositories opened directly through the File System Access API, so this feature requires `server.py`. The Docker image includes Git. notd invokes Git with argument arrays rather than a shell and restricts the requested path to the configured graph.
+For a graph that is not yet under version control, install Git and run the following commands once, replacing the path with the graph's location:
+
+```bash
+cd /absolute/path/to/graph
+git init --initial-branch=main
+git add .
+git commit -m "Initialize graph history"
+```
+
+If Git requests an author name or email, configure them by following the official [first-time Git setup](https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup). More information about repository creation is available in the [`git init` documentation](https://git-scm.com/docs/git-init).
+
+Create further snapshots whenever required:
+
+```bash
+git add .
+git commit -m "Update notes"
+```
+
+After at least one commit exists, choose **Page history** from the footer menu to display up to 100 commits for the current Markdown file. Each entry shows the short commit hash, subject, author, and date. Expand a commit to load and display its unified diff for that page; diffs are fetched only when requested. Added lines are highlighted in green, removed lines in red, hunk headers in cyan, and Git metadata uses the same syntax palette as code blocks. Rename history is followed when Git can detect it, and a notice appears when the working copy has uncommitted changes.
+
+The browser cannot inspect Git repositories opened directly through the File System Access API, so this feature is unavailable in direct local graph mode. The Docker image includes Git. notd invokes Git with argument arrays rather than a shell and restricts the requested path to the configured graph.
 
 ## Blocks and outliner
 
