@@ -1260,7 +1260,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!graphStore) return [];
     const today = NotdGraph.journalInfo(new Date(), graphStore.config).date;
     return graphStore.pages
-      .filter((page) => page.journal)
+      .filter(
+        (page) =>
+          page.journal && (!page.journalDate || page.journalDate <= today),
+      )
       .sort((a, b) => {
         if (a.journalDate === today) return -1;
         if (b.journalDate === today) return 1;
