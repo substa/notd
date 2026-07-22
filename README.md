@@ -4,6 +4,52 @@ notd is a local-first Markdown editor and Logseq-compatible outliner that runs w
 
 notd is deliberately very opinionated. It was created for a specific personal workflow and favors an ultraminimal interface, strong defaults, and very few options. That constraint is intentional: the project is unlikely to suit everyone, especially anyone looking for extensive customization, plugins, or collaborative editing.
 
+## Screenshots
+
+![Today's journal](assets/screenshots/01-today.png)
+
+<details>
+<summary>2. On this day</summary>
+
+![On this day timeline](assets/screenshots/02-on-this-day.png)
+
+</details>
+
+<details>
+<summary>3. Tasks for the day</summary>
+
+![Tasks for the current day](assets/screenshots/03-tasks-on-day.png)
+
+</details>
+
+<details>
+<summary>4. Task dashboard</summary>
+
+![Task dashboard](assets/screenshots/04-tasks.png)
+
+</details>
+
+<details>
+<summary>5. Linked references</summary>
+
+![Linked references](assets/screenshots/05-linked-references.png)
+
+</details>
+
+<details>
+<summary>6. Embedded media</summary>
+
+![Embedded media](assets/screenshots/06-embed.png)
+
+</details>
+
+<details>
+<summary>7. Page history</summary>
+
+![Git-backed page history](assets/screenshots/07-history.png)
+
+</details>
+
 ## Principles
 
 - Markdown files remain the source of truth.
@@ -38,7 +84,7 @@ python3 -m http.server 4173
 
 Open [http://localhost:4173](http://localhost:4173).
 
-The single-document editor works in current browsers. Direct graph access uses the File System Access API and works best in Chromium-based browsers.
+The single-document editor works in current browsers. Direct graph access uses the File System Access API.
 
 ## Working with a local graph
 
@@ -111,6 +157,7 @@ python3 server.py --port 4176 --graph /absolute/path/to/graph
 
 ```text
 assets/icons/       Browser and PWA icons
+assets/screenshots/ README screenshots
 docs/               User and deployment documentation
 tests/              Graph parser and index tests
 app.js              Browser application and interface behavior
