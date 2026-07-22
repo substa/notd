@@ -1284,6 +1284,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   function graphTasks() {
     if (!graphIndex) return [];
     const tasks = [];
+    let sequence = 0;
     for (const page of graphIndex.allPages()) {
       const document =
         page.path === state.graphPage?.path
@@ -1301,6 +1302,7 @@ Open, save, export, and reach recent documents or headings from the command pale
         const text = block.content
           .replace(/^[A-Z]+(?:\s+|$)/, "")
           .replace(/^\s*(?:SCHEDULED|DEADLINE):.*$/gm, "")
+          .replace(/^\s*[\w-]+::.*$/gm, "")
           .trim()
           .replace(/\(\(([0-9a-z-]{8,})\)\)/gi, (_, uuid) =>
             blockReferenceLabel(uuid),
@@ -1314,6 +1316,9 @@ Open, save, export, and reach recent documents or headings from the command pale
           done: /^(DONE|CANCELED|CANCELLED)$/.test(marker),
           progress: /^(DOING|NOW)$/.test(marker),
           later: /^(LATER|WAITING)$/.test(marker),
+          completedAt:
+            NotdGraph.propertiesFrom(block.content)["completed-at"] || "",
+          sequence: sequence++,
         });
       }
     }
@@ -1359,42 +1364,115 @@ Open, save, export, and reach recent documents or headings from the command pale
     } catch {}
   }
 
+  function taskTimestamp(value) {
+    if (!value) return 0;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric))
+      return numeric > 1e15 ? numeric / 1e6 : numeric;
+    const timestamp = Date.parse(value);
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  }
+
+  function taskSourceTimestamp(task) {
+    return (
+      taskTimestamp(
+        task.page.journalDate && `${task.page.journalDate}T12:00:00`,
+      ) || taskTimestamp(task.page.lastModified)
+    );
+  }
+
+  function compareTaskFallback(left, right) {
+    return (
+      taskSourceTimestamp(right) - taskSourceTimestamp(left) ||
+      left.text.localeCompare(right.text) ||
+      left.sequence - right.sequence
+    );
+  }
+
+  function compareScheduledTasks(left, right) {
+    if (left.scheduled !== right.scheduled) {
+      if (!left.scheduled) return 1;
+      if (!right.scheduled) return -1;
+      return left.scheduled.localeCompare(right.scheduled);
+    }
+    return compareTaskFallback(left, right);
+  }
+
+  function compareCompletedTasks(left, right) {
+    return (
+      (taskTimestamp(right.completedAt) || taskSourceTimestamp(right)) -
+        (taskTimestamp(left.completedAt) || taskSourceTimestamp(left)) ||
+      compareTaskFallback(left, right)
+    );
+  }
+
   function taskGroups(tasks = graphTasks()) {
     const today = taskDate();
     const week = taskDate(7);
     const now = new Date();
     const endOfWeek = taskDate((7 - now.getDay()) % 7);
     return {
-      overdue: tasks.filter(
-        (task) => !task.done && task.scheduled && task.scheduled < today,
-      ),
-      today: tasks.filter(
-        (task) =>
-          !task.done &&
-          (task.scheduled === today ||
-            (!task.scheduled && task.page.journalDate === today)),
-      ),
-      progress: tasks.filter((task) => !task.done && task.progress),
-      next: tasks.filter((task) => !task.done && task.scheduled > today),
-      thisWeek: tasks.filter(
-        (task) =>
-          !task.done && task.scheduled >= today && task.scheduled <= endOfWeek,
-      ),
-      nextWeek: tasks.filter(
-        (task) =>
-          !task.done && task.scheduled > today && task.scheduled <= week,
-      ),
-      unscheduled: tasks.filter(
-        (task) => !task.done && !task.scheduled && !task.later,
-      ),
-      later: tasks.filter((task) => !task.done && task.later),
-      done: tasks.filter((task) => task.done),
+      overdue: tasks
+        .filter(
+          (task) => !task.done && task.scheduled && task.scheduled < today,
+        )
+        .sort(compareScheduledTasks),
+      today: tasks
+        .filter(
+          (task) =>
+            !task.done &&
+            (task.scheduled === today ||
+              (!task.scheduled && task.page.journalDate === today)),
+        )
+        .sort(compareScheduledTasks),
+      progress: tasks
+        .filter((task) => !task.done && task.progress)
+        .sort(compareScheduledTasks),
+      next: tasks
+        .filter((task) => !task.done && task.scheduled > today)
+        .sort(compareScheduledTasks),
+      thisWeek: tasks
+        .filter(
+          (task) =>
+            !task.done &&
+            task.scheduled >= today &&
+            task.scheduled <= endOfWeek,
+        )
+        .sort(compareScheduledTasks),
+      nextWeek: tasks
+        .filter(
+          (task) =>
+            !task.done && task.scheduled > today && task.scheduled <= week,
+        )
+        .sort(compareScheduledTasks),
+      unscheduled: tasks
+        .filter((task) => !task.done && !task.scheduled && !task.later)
+        .sort(compareTaskFallback),
+      later: tasks
+        .filter((task) => !task.done && task.later)
+        .sort(compareScheduledTasks),
+      done: tasks.filter((task) => task.done).sort(compareCompletedTasks),
     };
+  }
+
+  function updateTaskCompletionMetadata(content, marker) {
+    const withoutCompletion = content
+      .replace(/^\s*completed-at::.*(?:\n|$)/gim, "")
+      .trimEnd();
+    return marker === "DONE"
+      ? `${withoutCompletion}\ncompleted-at:: ${new Date().toISOString()}`
+      : withoutCompletion;
   }
 
   const taskId = (task) => `${task.page.path}:${task.block.id}`;
   const taskPersistenceId = (task) =>
-    `${task.page.path}:${task.block.uuid || task.block.content.replace(/^[A-Z]+(?:\s+|$)/, "").trim()}`;
+    `${task.page.path}:${
+      task.block.uuid ||
+      task.block.content
+        .replace(/^[A-Z]+(?:\s+|$)/, "")
+        .replace(/^\s*completed-at::.*$/gim, "")
+        .trim()
+    }`;
 
   function uniqueTasks(...groups) {
     return [
@@ -2725,7 +2803,10 @@ Open, save, export, and reach recent documents or headings from the command pale
         : completed
           ? "TODO"
           : "DONE";
-    block.content = block.content.replace(/^[A-Z]+/, next);
+    block.content = updateTaskCompletionMetadata(
+      block.content.replace(/^[A-Z]+/, next),
+      next,
+    );
     const feedbackStarted = showTaskUpdateFeedback(
       options.feedbackElement,
       next,
@@ -3265,6 +3346,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     )?.[1];
     block.content = cycledTaskContent(block.content);
     const after = block.content.match(/^(TODO|DOING|DONE)(?:\s+|$)/)?.[1];
+    block.content = updateTaskCompletionMetadata(block.content, after);
     if (before && after)
       recordTaskHistory(
         state.graphPage?.path,
@@ -4092,7 +4174,11 @@ Open, save, export, and reach recent documents or headings from the command pale
       )?.[1];
       if (!marker) throw new Error("The block is no longer a task");
       const target = redo ? operation.after : operation.before;
-      block.content = block.content.replace(/^[A-Z]+/, target);
+      const originalContent = block.content;
+      block.content = updateTaskCompletionMetadata(
+        block.content.replace(/^[A-Z]+/, target),
+        target,
+      );
       if (current) graphChanged();
       else {
         const content = NotdGraph.serializeDocument(document);
@@ -4100,7 +4186,7 @@ Open, save, export, and reach recent documents or headings from the command pale
           await graphStore.writePage(page, content);
           graphIndex.updatePage(page, content);
         } catch (error) {
-          block.content = block.content.replace(/^[A-Z]+/, marker);
+          block.content = originalContent;
           throw error;
         }
         if (page.journal || journalDocuments.has(page.path))

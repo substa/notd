@@ -193,6 +193,8 @@ TODO → DOING → DONE → TODO
 
 Changes made from a task summary or dashboard are written back to the task's original Markdown page. Before a task moves to another section or disappears from the current filtered list, its row briefly displays **Completed**, **In progress**, or **To do** to confirm the new state.
 
+Dashboard tasks with a scheduled date are ordered from the nearest date to the farthest. Completed tasks are ordered by completion time, newest first. When notd marks a task as `DONE`, it records a hidden `completed-at::` property in the block; existing completed tasks without this property fall back to their journal date or page modification time.
+
 Task-state changes participate in the regular undo/redo history, including changes made from summaries and dashboards. Use `⌘/Ctrl + Z` to restore the previous state and `⌘/Ctrl + Shift + Z` (or `⌘/Ctrl + Y`) to reapply it. Undo and redo update the task in its original Markdown page and show a confirmation message with the restored state.
 
 ## References
