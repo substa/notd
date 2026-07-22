@@ -92,7 +92,7 @@ The footer reports **Offline** and the number of pending changes. Synchronizatio
 
 Each queued write retains the server revision from which it started. If that revision is still current, the change is uploaded automatically. If the server version changed in the meantime, notd preserves the local operation and reports a synchronization conflict instead of overwriting either version. Page renaming, deletion, and attachment upload currently require a connection.
 
-The Service Worker caches only the application shell. Notes and pending operations are stored in IndexedDB rather than by indiscriminately caching graph API responses.
+The Service Worker caches the application shell and, on demand, graph attachments that have been opened successfully. Cached images, documents, audio, and video remain available offline; media range requests are served from the complete cached file. The attachment cache keeps at most 100 files or 200 MB and removes the oldest entries when either limit is exceeded. Storage remains best-effort because the browser, particularly iOS, can enforce a smaller quota or reclaim site data. Notes and pending operations are stored separately in IndexedDB rather than by indiscriminately caching graph API responses.
 
 A graph can contain:
 
