@@ -141,7 +141,7 @@ git commit -m "Initialize graph history"
 
 If Git requests an author name or email, configure them by following the official [first-time Git setup](https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup). More information about repository creation is available in the [`git init` documentation](https://git-scm.com/docs/git-init).
 
-After the initial commit, open **Settings → Git**. Automatic commits can group nearby graph changes into one `Update graph` snapshot after a delay of 5, 10, 30, or 60 seconds. **Push after commit** publishes each snapshot through the current branch's configured upstream; Git credentials must already be available to the operating-system user running `server.py`. notd never stores Git credentials.
+After the initial commit, open **Settings → Git**. Automatic commits can group nearby graph changes into one snapshot after a delay of 5, 10, 30, or 60 seconds. Commit messages describe the staged changes, for example `Update Earth`, `Add journal 2026-07-22`, `Rename Old page to New page`, or `Update Earth and Marvin`. **Push after commit** publishes each snapshot through the current branch's configured upstream; Git credentials must already be available to the operating-system user running `server.py`. notd never stores Git credentials.
 
 Use **Commit now** or **Commit and push now** to create a snapshot without waiting for the delay. Changes made externally by applications such as Logseq are detected and included. Repository hooks are disabled for commits created by notd, preventing older `pre-commit` or `post-commit` automation from running twice.
 

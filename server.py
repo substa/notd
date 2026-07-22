@@ -225,6 +225,84 @@ class GitSyncManager:
             self.timer.daemon = True
             self.timer.start()
 
+    @staticmethod
+    def _change_label(path: str, graph_path: str) -> str:
+        relative = PurePosixPath(path)
+        if graph_path != ".":
+            try:
+                relative = relative.relative_to(PurePosixPath(graph_path))
+            except ValueError:
+                pass
+        parts = relative.parts
+        value = relative.as_posix()
+        if value == ".notd/settings.json":
+            return "graph settings"
+        if parts and parts[0] == "assets":
+            return f"asset {'/'.join(parts[1:])}"
+        if parts and parts[0] == "journals":
+            stem = PurePosixPath("/".join(parts[1:])).with_suffix("").as_posix()
+            date = stem.replace("_", "-") if re.fullmatch(r"\d{4}_\d{2}_\d{2}", stem) else stem
+            return f"journal {unquote(date)}"
+        if parts and parts[0] == "pages":
+            value = "/".join(parts[1:])
+        if PurePosixPath(value).suffix.lower() in MARKDOWN_SUFFIXES:
+            value = str(PurePosixPath(value).with_suffix(""))
+        return unquote(value.replace("___", "/"))
+
+    @classmethod
+    def _commit_message(cls, name_status: str, graph_path: str) -> str:
+        values = name_status.split("\0")
+        changes: list[tuple[str, str, str | None]] = []
+        index = 0
+        while index < len(values) and values[index]:
+            status = values[index]
+            index += 1
+            if status.startswith("R") or status.startswith("C"):
+                if index + 1 >= len(values):
+                    break
+                source, target = values[index], values[index + 1]
+                index += 2
+                changes.append(("Rename", cls._change_label(source, graph_path), cls._change_label(target, graph_path)))
+            else:
+                if index >= len(values):
+                    break
+                path = values[index]
+                index += 1
+                verb = {"A": "Add", "D": "Delete", "M": "Update"}.get(status[:1], "Update")
+                changes.append((verb, cls._change_label(path, graph_path), None))
+        if not changes:
+            return "Update graph"
+        same_action = len({change[0] for change in changes}) == 1 and all(
+            target is None for _, _, target in changes
+        )
+        if same_action and len(changes) <= 3:
+            verb = changes[0][0]
+            labels = [label for _, label, _ in changes]
+            if len(labels) == 1:
+                message = f"{verb} {labels[0]}"
+            elif len(labels) == 2:
+                message = f"{verb} {labels[0]} and {labels[1]}"
+            else:
+                message = f"{verb} {labels[0]}, {labels[1]}, and {labels[2]}"
+        else:
+            phrases = []
+            for position, (verb, label, target) in enumerate(changes[:3]):
+                action = verb if position == 0 else verb.lower()
+                phrases.append(f"{action} {label}{f' to {target}' if target else ''}")
+            if len(changes) > 3:
+                phrases = phrases[:2] + [f"{len(changes) - 2} more"]
+            if len(phrases) == 1:
+                message = phrases[0]
+            elif len(phrases) == 2:
+                message = " and ".join(phrases)
+            else:
+                message = f"{', '.join(phrases[:-1])}, and {phrases[-1]}"
+        if len(message) <= 72:
+            return message
+        verbs = {change[0] for change in changes}
+        verb = verbs.pop() if len(verbs) == 1 else "Change"
+        return f"{verb} {len(changes)} graph files"
+
     def sync(self, push: bool | None = None) -> dict:
         if not self.operation_lock.acquire(blocking=False):
             with self.state_lock:
@@ -253,7 +331,13 @@ class GitSyncManager:
                     raise ValueError(changed.stderr.strip() or "Could not inspect staged changes")
                 committed = changed.returncode == 1
                 if committed:
-                    commit = self._run(["commit", "-m", "Update graph", "--", graph_path], root)
+                    summary = self._run(
+                        ["diff", "--cached", "--name-status", "--find-renames", "-z", "--", graph_path], root
+                    )
+                    if summary.returncode:
+                        raise ValueError(summary.stderr.strip() or "Could not summarize staged changes")
+                    message = self._commit_message(summary.stdout, graph_path)
+                    commit = self._run(["commit", "-m", message, "--", graph_path], root)
                     if commit.returncode:
                         raise ValueError(commit.stderr.strip() or "Could not commit graph changes")
             action = "Graph committed" if committed else "No changes to commit"

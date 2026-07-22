@@ -94,10 +94,30 @@ class GitSyncManagerTests(unittest.TestCase):
 
         status = self.manager.sync(push=False)
 
-        self.assertEqual(self.git("log", "-1", "--format=%s"), "Update graph")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Update note")
         self.assertFalse(marker.exists())
         self.assertEqual(status["lastAction"], "Graph committed")
         self.assertEqual(status["lastError"], "")
+
+    def test_builds_descriptive_messages_for_graph_changes(self):
+        cases = [
+            ("M\0pages/Earth.md\0", ".", "Update Earth"),
+            ("A\0journals/2026_07_22.md\0", ".", "Add journal 2026-07-22"),
+            ("A\0assets/images/cover.png\0", ".", "Add asset images/cover.png"),
+            ("M\0graph/.notd/settings.json\0", "graph", "Update graph settings"),
+            ("R100\0pages/Old.md\0pages/New.md\0", ".", "Rename Old to New"),
+            (
+                "M\0pages/Earth.md\0M\0pages/Marvin.md\0",
+                ".",
+                "Update Earth and Marvin",
+            ),
+        ]
+        for status, graph_path, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(
+                    self.manager._commit_message(status, graph_path),
+                    expected,
+                )
 
     def test_pushes_committed_changes_to_the_configured_upstream(self):
         remote = self.root / "remote.git"
