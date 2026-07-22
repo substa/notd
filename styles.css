@@ -1566,25 +1566,40 @@ svg {
 .context-block-row.graph-heading-row:not(.graph-heading-row-1) {
   margin-top: 0.6em;
 }
+.block-row.graph-heading-row-1 > .block-toggle,
 .block-row.graph-heading-row-1 > .block-bullet {
   height: 2.16em;
 }
+.block-row.graph-heading-row-2 > .block-toggle,
 .block-row.graph-heading-row-2 > .block-bullet {
   height: 1.8em;
 }
+.block-row.graph-heading-row-3 > .block-toggle,
 .block-row.graph-heading-row-3 > .block-bullet {
   height: 1.536em;
 }
+.block-row.graph-heading-row-4 > .block-toggle,
 .block-row.graph-heading-row-4 > .block-bullet {
   height: 1.368em;
 }
+.block-row.graph-heading-row-5 > .block-toggle,
 .block-row.graph-heading-row-5 > .block-bullet,
+.block-row.graph-heading-row-6 > .block-toggle,
 .block-row.graph-heading-row-6 > .block-bullet {
   height: 1.2em;
 }
-.block-row.graph-heading-row > .block-bullet:before {
+.block-row.graph-heading-row > .block-bullet:before,
+.block-row.graph-heading-row > .block-toggle:before {
   top: 50%;
+}
+.block-row.graph-heading-row > .block-bullet:before {
   transform: translateY(-50%);
+}
+.block-row.graph-heading-row > .block-toggle:before {
+  transform: translateY(-50%) rotate(45deg);
+}
+.block-node.collapsed > .block-row.graph-heading-row > .block-toggle:before {
+  transform: translateY(-50%) rotate(-45deg);
 }
 .graph-block-editor {
   display: block;
