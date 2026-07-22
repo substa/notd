@@ -1426,6 +1426,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     const content = graphContentElement(block, page);
     content.classList.add(`${variant}-content`);
+    const firstHeading = content.firstElementChild;
+    if (firstHeading?.classList.contains("graph-heading")) {
+      row.classList.add(
+        "graph-heading-row",
+        `graph-heading-row-${firstHeading.tagName.slice(1)}`,
+      );
+    }
     row.append(content);
     node.append(row);
     if (block.children.length) {

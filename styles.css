@@ -1540,7 +1540,7 @@ svg {
   text-wrap: balance;
 }
 .graph-block-content .graph-heading:not(:first-child) {
-  margin-top: 0.55em;
+  margin-top: 0.8em;
 }
 .graph-block-content h1.graph-heading {
   font-size: 1.8em;
@@ -1561,6 +1561,10 @@ svg {
 .graph-block-content h6.graph-heading {
   font-size: 1em;
   letter-spacing: -0.012em;
+}
+.block-row.graph-heading-row:not(.graph-heading-row-1),
+.context-block-row.graph-heading-row:not(.graph-heading-row-1) {
+  margin-top: 0.6em;
 }
 .block-row.graph-heading-row-1 > .block-bullet {
   height: 2.16em;
