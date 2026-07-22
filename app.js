@@ -5827,6 +5827,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     $("#settingsTheme").value = selectedTheme;
     $("#settingsAccent").value = selectedAccent;
     $("#settingsVim").checked = state.vimEnabled;
+    $("#settingsAssetCacheSize").value = String(assetCacheSize());
     if (tab === "git") {
       updateGitSettingsControls();
       await loadGitSettingsStatus();
@@ -7070,6 +7071,9 @@ Open, save, export, and reach recent documents or headings from the command pale
   $("#settingsVim").addEventListener("change", (event) =>
     setVimEnabled(event.target.checked, false),
   );
+  $("#settingsAssetCacheSize").addEventListener("change", (event) =>
+    setAssetCacheSize(event.target.value),
+  );
   [
     "#settingsGitAutoCommit",
     "#settingsGitAutoPush",
@@ -7870,6 +7874,34 @@ Open, save, export, and reach recent documents or headings from the command pale
     } else localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
   }
 
+  const ASSET_CACHE_SIZES = [50, 100, 200, 500, 1000];
+  function assetCacheSize() {
+    const value = Number(localSettings().assetCacheSizeMB);
+    return ASSET_CACHE_SIZES.includes(value) ? value : 200;
+  }
+  function syncAssetCacheSize() {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.ready
+      .then((registration) => {
+        const worker =
+          navigator.serviceWorker.controller || registration.active;
+        worker?.postMessage({
+          type: "configure-asset-cache",
+          maxBytes: assetCacheSize() * 1024 * 1024,
+        });
+      })
+      .catch(() => {});
+  }
+  function setAssetCacheSize(value) {
+    const size = Number(value);
+    if (!ASSET_CACHE_SIZES.includes(size)) return;
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ ...localSettings(), assetCacheSizeMB: size }),
+    );
+    syncAssetCacheSize();
+  }
+
   async function loadGraphSettings() {
     if (!graphStore.isRemote && graphStore.readConfig)
       await graphStore.readConfig();
@@ -8332,6 +8364,14 @@ Open, save, export, and reach recent documents or headings from the command pale
       );
     });
   }
-  if ("serviceWorker" in navigator && location.protocol.startsWith("http"))
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    navigator.serviceWorker
+      .register("sw.js")
+      .then(syncAssetCacheSize)
+      .catch(() => {});
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      syncAssetCacheSize,
+    );
+  }
 })();

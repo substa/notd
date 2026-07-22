@@ -1,7 +1,13 @@
-const CACHE = "notd-editor-v19";
+const CACHE = "notd-editor-v20";
 const ASSET_CACHE = "notd-graph-assets-v1";
+const SETTINGS_CACHE = "notd-pwa-settings-v1";
 const MAX_ASSET_ENTRIES = 100;
-const MAX_ASSET_BYTES = 200 * 1024 * 1024;
+const DEFAULT_MAX_ASSET_BYTES = 200 * 1024 * 1024;
+const ASSET_CACHE_SETTINGS_URL = new URL(
+  "./__notd_pwa_settings__",
+  self.registration.scope,
+).href;
+let maxAssetBytesPromise = null;
 const ASSETS = [
   "./",
   "./index.html",
@@ -41,7 +47,12 @@ self.addEventListener("activate", (event) =>
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key !== CACHE && key !== ASSET_CACHE)
+            .filter(
+              (key) =>
+                key !== CACHE &&
+                key !== ASSET_CACHE &&
+                key !== SETTINGS_CACHE,
+            )
             .map((key) => caches.delete(key)),
         ),
       )
@@ -57,8 +68,41 @@ function isGraphAsset(url) {
   );
 }
 
+async function maxAssetBytes() {
+  if (!maxAssetBytesPromise)
+    maxAssetBytesPromise = caches
+      .open(SETTINGS_CACHE)
+      .then((cache) => cache.match(ASSET_CACHE_SETTINGS_URL))
+      .then(async (response) => {
+        if (!response) return DEFAULT_MAX_ASSET_BYTES;
+        const value = Number(await response.text());
+        return Number.isFinite(value) && value >= 0
+          ? value
+          : DEFAULT_MAX_ASSET_BYTES;
+      })
+      .catch(() => DEFAULT_MAX_ASSET_BYTES);
+  return maxAssetBytesPromise;
+}
+
+async function setMaxAssetBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return;
+  maxAssetBytesPromise = Promise.resolve(bytes);
+  const settings = await caches.open(SETTINGS_CACHE);
+  await settings.put(ASSET_CACHE_SETTINGS_URL, new Response(String(bytes)));
+  await trimAssetCache(await caches.open(ASSET_CACHE));
+}
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "configure-asset-cache")
+    event.waitUntil(setMaxAssetBytes(event.data.maxBytes));
+});
+
 async function trimAssetCache(cache) {
-  const requests = await cache.keys();
+  const [requests, byteLimit] = await Promise.all([
+    cache.keys(),
+    maxAssetBytes(),
+  ]);
   const entries = await Promise.all(
     requests.map(async (request) => {
       const response = await cache.match(request);
@@ -71,7 +115,7 @@ async function trimAssetCache(cache) {
   let bytes = entries.reduce((total, entry) => total + entry.size, 0);
   let count = entries.length;
   for (const entry of entries) {
-    if (count <= MAX_ASSET_ENTRIES && bytes <= MAX_ASSET_BYTES) break;
+    if (count <= MAX_ASSET_ENTRIES && bytes <= byteLimit) break;
     if (await cache.delete(entry.request)) {
       count--;
       bytes -= entry.size;
