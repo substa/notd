@@ -3537,6 +3537,26 @@ Open, save, export, and reach recent documents or headings from the command pale
     },
     { title: "/upload", keywords: "attach file asset", upload: true },
   ];
+  function pageMatchRank(value, query) {
+    const normalized = NotdGraph.normalizePage(value);
+    if (!query || normalized === query) return 0;
+    if (normalized.startsWith(query)) return 1;
+    if (
+      normalized
+        .split(/[\s/._-]+/)
+        .some((part) => part.startsWith(query))
+    )
+      return 2;
+    return normalized.includes(query) ? 3 : Infinity;
+  }
+  function graphPageMatchRank(page, query) {
+    return Math.min(
+      pageMatchRank(page.title, query),
+      ...(graphIndex?.aliasesForPage(page) || []).map((alias) =>
+        pageMatchRank(alias, query),
+      ),
+    );
+  }
   function blockAutocompleteResults(query) {
     if (!graphIndex) return [];
     const needle = NotdGraph.normalizePage(query);
@@ -3602,14 +3622,17 @@ Open, save, export, and reach recent documents or headings from the command pale
       const query = NotdGraph.normalizePage(title);
       const pages = graphIndex.pageSuggestions();
       const matches = pages
-        .filter(
-          (page) =>
-            !query || NotdGraph.normalizePage(page.title).includes(query),
+        .map((page) => ({ page, rank: graphPageMatchRank(page, query) }))
+        .filter((item) => Number.isFinite(item.rank))
+        .sort(
+          (a, b) =>
+            a.rank - b.rank ||
+            a.page.title.length - b.page.title.length ||
+            a.page.title.localeCompare(b.page.title),
         )
-        .slice(0, 12);
-      const exactMatch =
-        query &&
-        pages.some((page) => NotdGraph.normalizePage(page.title) === query);
+        .slice(0, 12)
+        .map((item) => item.page);
+      const exactMatch = query && graphIndex.resolvePage(title);
       autocompleteItems =
         title && !exactMatch
           ? [{ title, create: true }, ...matches].slice(0, 12)
@@ -6003,7 +6026,8 @@ Open, save, export, and reach recent documents or headings from the command pale
         if (seen.has(page.path)) return [];
         seen.add(page.path);
         const aliases = graphIndex?.aliasesForPage(page) || [];
-        if (!normalizedQuery) return [{ page, aliases, matchedAlias: "" }];
+        if (!normalizedQuery)
+          return [{ page, aliases, matchedAlias: "", rank: 0 }];
         const results = [];
         const aliasKeys = new Set();
         for (const alias of aliases) {
@@ -6015,11 +6039,31 @@ Open, save, export, and reach recent documents or headings from the command pale
           )
             continue;
           aliasKeys.add(key);
-          results.push({ page, aliases, matchedAlias: alias });
+          results.push({
+            page,
+            aliases,
+            matchedAlias: alias,
+            rank: pageMatchRank(alias, normalizedQuery),
+          });
         }
         if (NotdGraph.normalizePage(page.title).includes(normalizedQuery))
-          results.push({ page, aliases, matchedAlias: "" });
+          results.push({
+            page,
+            aliases,
+            matchedAlias: "",
+            rank: pageMatchRank(page.title, normalizedQuery),
+          });
         return results;
+      })
+      .sort((a, b) => {
+        if (!normalizedQuery) return 0;
+        const labelA = a.matchedAlias || a.page.title;
+        const labelB = b.matchedAlias || b.page.title;
+        return (
+          a.rank - b.rank ||
+          labelA.length - labelB.length ||
+          labelA.localeCompare(labelB)
+        );
       })
       .slice(0, 80);
     const pages = matchedPages.map(({ page, aliases, matchedAlias }) => ({

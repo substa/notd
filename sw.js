@@ -1,4 +1,4 @@
-const CACHE = "notd-editor-v16";
+const CACHE = "notd-editor-v17";
 const ASSET_CACHE = "notd-graph-assets-v1";
 const MAX_ASSET_ENTRIES = 100;
 const MAX_ASSET_BYTES = 200 * 1024 * 1024;
