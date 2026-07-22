@@ -73,10 +73,11 @@ class EventBroker:
 
 
 class GraphWatcher(threading.Thread):
-    def __init__(self, graph: Path, broker: EventBroker) -> None:
+    def __init__(self, graph: Path, broker: EventBroker, on_change=None) -> None:
         super().__init__(name="notd-graph-watcher", daemon=True)
         self.graph = graph
         self.broker = broker
+        self.on_change = on_change
         self.stopped = threading.Event()
         self.lock = threading.Lock()
         self.snapshot = self._scan()
@@ -111,16 +112,176 @@ class GraphWatcher(threading.Thread):
                 current = self._scan()
                 previous = self.snapshot
                 self.snapshot = current
+            changed = False
             for path, revision in current.items():
                 if path not in previous:
+                    changed = True
                     self.broker.publish({"type": "created", "path": path, "revision": revision})
                 elif previous[path] != revision:
+                    changed = True
                     self.broker.publish({"type": "changed", "path": path, "revision": revision})
             for path in previous.keys() - current.keys():
+                changed = True
                 self.broker.publish({"type": "deleted", "path": path})
+            if changed and self.on_change:
+                self.on_change()
 
     def stop(self) -> None:
         self.stopped.set()
+
+
+class GitSyncManager:
+    """Create debounced Git snapshots for a graph and optionally push them."""
+
+    def __init__(self, graph: Path, mutation_lock: threading.Lock) -> None:
+        self.graph = graph
+        self.mutation_lock = mutation_lock
+        self.state_lock = threading.Lock()
+        self.operation_lock = threading.Lock()
+        self.timer: threading.Timer | None = None
+        self.pending = False
+        self.running = False
+        self.last_action = ""
+        self.last_error = ""
+        self.last_synced_at = 0.0
+
+    def _run(self, arguments: list[str], root: Path | None = None, timeout: int = 20) -> subprocess.CompletedProcess:
+        environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        return subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "-C", str(root or self.graph), *arguments],
+            capture_output=True, text=True, timeout=timeout, check=False, env=environment,
+        )
+
+    def _context(self) -> tuple[Path, str, str, str]:
+        repository = self._run(["rev-parse", "--show-toplevel"])
+        if repository.returncode:
+            raise ValueError("The graph is not inside a Git repository")
+        root = Path(repository.stdout.strip()).resolve()
+        try:
+            graph_path = self.graph.relative_to(root).as_posix() or "."
+        except ValueError as error:
+            raise ValueError("The graph is outside the Git repository") from error
+        branch_result = self._run(["branch", "--show-current"], root)
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+        upstream_result = self._run(
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], root
+        )
+        upstream = upstream_result.stdout.strip() if upstream_result.returncode == 0 else ""
+        return root, graph_path, branch, upstream
+
+    def _settings(self) -> dict:
+        try:
+            settings = json.loads((self.graph / ".notd" / "settings.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {}
+        value = settings.get("gitSync", {}) if isinstance(settings, dict) else {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _delay(settings: dict) -> int:
+        try:
+            value = int(settings.get("debounceSeconds", 10) or 10)
+        except (TypeError, ValueError):
+            value = 10
+        return max(2, min(300, value))
+
+    def status(self) -> dict:
+        settings = self._settings()
+        try:
+            _, _, branch, upstream = self._context()
+            available = True
+            message = "Git repository ready"
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            available = False
+            branch = ""
+            upstream = ""
+            message = str(error)
+        with self.state_lock:
+            return {
+                "available": available,
+                "message": message,
+                "branch": branch,
+                "upstream": upstream,
+                "autoCommit": bool(settings.get("autoCommit", False)),
+                "autoPush": bool(settings.get("autoPush", False)),
+                "debounceSeconds": self._delay(settings),
+                "pending": self.pending,
+                "running": self.running,
+                "lastAction": self.last_action,
+                "lastError": self.last_error,
+                "lastSyncedAt": round(self.last_synced_at * 1000),
+            }
+
+    def schedule(self) -> None:
+        settings = self._settings()
+        if not settings.get("autoCommit"):
+            return
+        delay = self._delay(settings)
+        with self.state_lock:
+            if self.timer:
+                self.timer.cancel()
+            self.pending = True
+            self.timer = threading.Timer(delay, self.sync)
+            self.timer.daemon = True
+            self.timer.start()
+
+    def sync(self, push: bool | None = None) -> dict:
+        if not self.operation_lock.acquire(blocking=False):
+            with self.state_lock:
+                self.pending = True
+                self.timer = threading.Timer(2, self.sync)
+                self.timer.daemon = True
+                self.timer.start()
+            return self.status()
+        with self.state_lock:
+            if self.timer:
+                self.timer.cancel()
+                self.timer = None
+            self.pending = False
+            self.running = True
+            self.last_error = ""
+        try:
+            settings = self._settings()
+            should_push = bool(settings.get("autoPush", False)) if push is None else bool(push)
+            root, graph_path, _, upstream = self._context()
+            with self.mutation_lock:
+                added = self._run(["add", "--all", "--", graph_path], root)
+                if added.returncode:
+                    raise ValueError(added.stderr.strip() or "Could not stage graph changes")
+                changed = self._run(["diff", "--cached", "--quiet", "--", graph_path], root)
+                if changed.returncode not in {0, 1}:
+                    raise ValueError(changed.stderr.strip() or "Could not inspect staged changes")
+                committed = changed.returncode == 1
+                if committed:
+                    commit = self._run(["commit", "-m", "Update graph", "--", graph_path], root)
+                    if commit.returncode:
+                        raise ValueError(commit.stderr.strip() or "Could not commit graph changes")
+            action = "Graph committed" if committed else "No changes to commit"
+            if should_push:
+                if not upstream:
+                    raise ValueError("The current branch has no upstream remote")
+                pushed = self._run(["push"], root, timeout=60)
+                if pushed.returncode:
+                    raise ValueError(pushed.stderr.strip() or "Could not push graph changes")
+                action = "Graph committed and pushed" if committed else "Remote already up to date"
+            with self.state_lock:
+                self.last_action = action
+                self.last_synced_at = time.time()
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            with self.state_lock:
+                self.last_error = str(error)
+                self.last_action = "Git sync failed"
+        finally:
+            with self.state_lock:
+                self.running = False
+            self.operation_lock.release()
+        return self.status()
+
+    def stop(self) -> None:
+        with self.state_lock:
+            if self.timer:
+                self.timer.cancel()
+                self.timer = None
 
 
 def journal_config(graph: Path) -> dict[str, str]:
@@ -152,6 +313,10 @@ class NotdHandler(SimpleHTTPRequestHandler):
     @property
     def watcher(self) -> GraphWatcher | None:
         return self.server.watcher  # type: ignore[attr-defined]
+
+    @property
+    def git_sync(self) -> GitSyncManager | None:
+        return self.server.git_sync  # type: ignore[attr-defined]
 
     def end_headers(self) -> None:
         route = urlparse(self.path).path
@@ -401,6 +566,10 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 return self.stream_events()
             if parsed.path == "/api/graph/status":
                 return self.json_response({"enabled": True, "name": self.graph.name, "config": journal_config(self.graph)})
+            if parsed.path == "/api/graph/git/status":
+                if not self.git_sync:
+                    return self.json_response({"available": False, "message": "Git sync is unavailable"})
+                return self.json_response(self.git_sync.status())
             if parsed.path == "/api/graph/settings":
                 target = self.graph / ".notd" / "settings.json"
                 if not target.is_file():
@@ -576,6 +745,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 content = json.dumps(settings, ensure_ascii=False, indent=2) + "\n"
                 with self.server.mutation_lock:  # type: ignore[attr-defined]
                     self.atomic_write(self.graph / ".notd" / "settings.json", content)
+                self.git_sync and self.git_sync.schedule()
                 return self.json_response({"saved": True})
             except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
                 return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
@@ -597,6 +767,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 target = self.write_asset(target, content)
                 relative = target.relative_to(self.graph).as_posix()
                 self.broker.publish({"type": "asset", "path": relative, "clientId": self.headers.get("X-Notd-Client")})
+                self.git_sync and self.git_sync.schedule()
                 return self.json_response({"path": relative})
             except (ValueError, OSError) as error:
                 return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
@@ -607,6 +778,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
             target = self.graph_path(str(payload.get("path", "")), markdown_only=True)
             exists, relative, revision = self.write_markdown(target, payload)
             self.broker.publish({"type": "changed" if exists else "created", "path": relative, "revision": str(revision), "clientId": payload.get("clientId")})
+            self.git_sync and self.git_sync.schedule()
             self.json_response({"path": relative, "revision": str(revision)})
         except FileNotFoundError:
             self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
@@ -638,6 +810,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                     else:
                         target.unlink()
                 self.broker.publish({"type": "deleted", "path": relative, "clientId": payload.get("clientId")})
+                self.git_sync and self.git_sync.schedule()
                 return self.json_response({"path": relative})
             except FileNotFoundError:
                 return self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
@@ -654,6 +827,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 target.unlink()
             relative = target.relative_to(self.graph).as_posix()
             self.broker.publish({"type": "asset-deleted", "path": relative, "clientId": self.headers.get("X-Notd-Client")})
+            self.git_sync and self.git_sync.schedule()
             self.json_response({"path": relative})
         except FileNotFoundError:
             self.error_json(HTTPStatus.NOT_FOUND, "Asset not found")
@@ -664,6 +838,14 @@ class NotdHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self.require_api_access(parsed, write=True):
             return
+        if parsed.path == "/api/graph/git/sync":
+            if not self.graph or not self.git_sync:
+                return self.error_json(HTTPStatus.NOT_FOUND, "Git sync is unavailable")
+            try:
+                payload = self.request_json()
+                return self.json_response(self.git_sync.sync(push=bool(payload.get("push", False))))
+            except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
+                return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
         if parsed.path != "/api/graph/rename":
             return self.error_json(HTTPStatus.NOT_FOUND, "Unknown graph endpoint")
         try:
@@ -710,6 +892,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
                 else:
                     revision = rename_file()
             self.broker.publish({"type": "renamed", "path": target_relative, "oldPath": source_relative, "revision": str(revision), "clientId": payload.get("clientId")})
+            self.git_sync and self.git_sync.schedule()
             self.json_response({"path": target_relative, "revision": str(revision)})
         except FileNotFoundError:
             self.error_json(HTTPStatus.NOT_FOUND, "Graph file not found")
@@ -734,10 +917,11 @@ def main() -> None:
     server = ThreadingHTTPServer((arguments.host, arguments.port), handler)
     server.graph = graph  # type: ignore[attr-defined]
     server.broker = EventBroker()  # type: ignore[attr-defined]
-    server.watcher = GraphWatcher(graph, server.broker) if graph else None  # type: ignore[attr-defined]
     server.file_cache = {}  # type: ignore[attr-defined]
     server.file_cache_lock = threading.Lock()  # type: ignore[attr-defined]
     server.mutation_lock = threading.Lock()  # type: ignore[attr-defined]
+    server.git_sync = GitSyncManager(graph, server.mutation_lock) if graph else None  # type: ignore[attr-defined]
+    server.watcher = GraphWatcher(graph, server.broker, server.git_sync.schedule) if graph else None  # type: ignore[attr-defined]
     if server.watcher:
         server.watcher.start()
     location = f"http://{arguments.host}:{arguments.port}"
@@ -752,6 +936,8 @@ def main() -> None:
     finally:
         if server.watcher:
             server.watcher.stop()
+        if server.git_sync:
+            server.git_sync.stop()
         server.server_close()
 
 

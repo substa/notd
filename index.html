@@ -434,6 +434,14 @@
         <div class="settings-layout">
           <nav class="settings-nav" aria-label="Settings sections">
             <button type="button" data-settings-tab="general">General</button>
+            <button
+              id="settingsGitTab"
+              type="button"
+              data-settings-tab="git"
+              hidden
+            >
+              Git
+            </button>
             <button type="button" data-settings-tab="shortcuts">
               Shortcuts
             </button>
@@ -471,6 +479,63 @@
                   ><small>Enable Normal and Insert editing modes.</small></span
                 ><input id="settingsVim" type="checkbox" role="switch"
               /></label>
+            </section>
+            <section
+              class="settings-panel settings-git"
+              data-settings-panel="git"
+              hidden
+            >
+              <h1>Git</h1>
+              <div class="git-settings-status" id="gitSettingsStatus">
+                <strong>Checking repository…</strong>
+                <small></small>
+              </div>
+              <dl class="git-settings-meta">
+                <div>
+                  <dt>Branch</dt>
+                  <dd id="gitSettingsBranch">—</dd>
+                </div>
+                <div>
+                  <dt>Upstream</dt>
+                  <dd id="gitSettingsUpstream">—</dd>
+                </div>
+              </dl>
+              <label class="settings-field"
+                ><span
+                  ><strong>Automatic commits</strong
+                  ><small
+                    >Commit graph changes after a short delay.</small
+                  ></span
+                ><input
+                  id="settingsGitAutoCommit"
+                  type="checkbox"
+                  role="switch"
+              /></label>
+              <label class="settings-field"
+                ><span
+                  ><strong>Push after commit</strong
+                  ><small
+                    >Push snapshots using the branch's configured
+                    upstream.</small
+                  ></span
+                ><input id="settingsGitAutoPush" type="checkbox" role="switch"
+              /></label>
+              <label class="settings-field"
+                ><span
+                  ><strong>Commit delay</strong
+                  ><small
+                    >Combine nearby saves into one Git snapshot.</small
+                  ></span
+                ><select id="settingsGitDelay">
+                  <option value="5">5 seconds</option>
+                  <option value="10">10 seconds</option>
+                  <option value="30">30 seconds</option>
+                  <option value="60">1 minute</option>
+                </select></label
+              >
+              <div class="git-settings-actions">
+                <button id="gitSyncNow" type="button">Commit now</button>
+              </div>
             </section>
             <section
               class="settings-panel settings-shortcuts"

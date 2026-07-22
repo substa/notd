@@ -2790,6 +2790,63 @@ svg {
   height: 18px;
   accent-color: var(--accent);
 }
+.git-settings-status {
+  display: grid;
+  gap: 5px;
+  margin: -12px 0 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--chrome);
+}
+.git-settings-status strong {
+  font: 600 13px var(--ui);
+}
+.git-settings-status small,
+.git-settings-meta {
+  color: var(--muted);
+  font: 12px/1.45 var(--ui);
+}
+.git-settings-status.error {
+  border-color: color-mix(in srgb, #b94a48 45%, var(--border));
+}
+.git-settings-meta {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 16px;
+}
+.git-settings-meta div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+.git-settings-meta dt {
+  font-weight: 600;
+}
+.git-settings-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+}
+.git-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 20px;
+}
+.git-settings-actions button {
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--chrome);
+  color: var(--text);
+  font: 500 12px var(--ui);
+}
+.git-settings-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.git-settings-actions button:disabled {
+  opacity: 0.5;
+}
 .settings-shortcuts > header {
   display: flex;
   align-items: end;

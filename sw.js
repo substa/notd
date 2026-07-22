@@ -1,4 +1,4 @@
-const CACHE = "notd-editor-v9";
+const CACHE = "notd-editor-v10";
 const ASSETS = [
   "./",
   "./index.html",

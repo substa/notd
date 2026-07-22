@@ -70,7 +70,7 @@ notd is deliberately very opinionated. It was created for a specific personal wo
 - Command palette, customizable keyboard shortcuts, and optional Vim navigation.
 - Light, dark, and system themes with a configurable accent color.
 - Offline PWA support and recovery drafts.
-- Optional graph server with atomic writes, conflict detection, offline queues, and live updates.
+- Optional graph server with atomic writes, conflict detection, offline queues, live updates, and configurable Git snapshots.
 
 The complete user guide is available in [docs/user-guide.md](docs/user-guide.md) and inside the application.
 

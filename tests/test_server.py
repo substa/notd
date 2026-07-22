@@ -1,9 +1,12 @@
+import json
+import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from server import NotdHandler
+from server import GitSyncManager, NotdHandler
 
 
 class GraphAssetPathTests(unittest.TestCase):
@@ -47,6 +50,73 @@ class GraphAssetPathTests(unittest.TestCase):
             self.skipTest("Symbolic links are not available")
         with self.assertRaises(ValueError):
             self.handler.graph_asset_path("assets/config")
+
+
+class GitSyncManagerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        self.graph = self.root / "graph"
+        (self.graph / "pages").mkdir(parents=True)
+        (self.graph / ".notd").mkdir()
+        (self.graph / "pages" / "note.md").write_text("- Initial\n")
+        (self.graph / ".notd" / "settings.json").write_text(
+            json.dumps({"gitSync": {"autoCommit": True, "autoPush": False, "debounceSeconds": 10}})
+        )
+        self.git("init", "--initial-branch=main")
+        self.git("config", "user.name", "notd test")
+        self.git("config", "user.email", "notd@example.invalid")
+        self.git("add", ".")
+        self.git("commit", "-m", "Initial graph")
+        self.manager = GitSyncManager(self.graph, threading.Lock())
+
+    def tearDown(self):
+        self.manager.stop()
+        self.temporary.cleanup()
+
+    def git(self, *arguments, directory=None):
+        result = subprocess.run(
+            ["git", "-C", str(directory or self.graph), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            self.fail(result.stderr or result.stdout)
+        return result.stdout.strip()
+
+    def test_commits_graph_changes_without_running_repository_hooks(self):
+        marker = self.root / "hook-ran"
+        hook = self.graph / ".git" / "hooks" / "post-commit"
+        hook.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
+        hook.chmod(0o755)
+        (self.graph / "pages" / "note.md").write_text("- Changed\n")
+
+        status = self.manager.sync(push=False)
+
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Update graph")
+        self.assertFalse(marker.exists())
+        self.assertEqual(status["lastAction"], "Graph committed")
+        self.assertEqual(status["lastError"], "")
+
+    def test_pushes_committed_changes_to_the_configured_upstream(self):
+        remote = self.root / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+        self.git("remote", "add", "origin", str(remote))
+        self.git("push", "-u", "origin", "main")
+        (self.graph / "pages" / "note.md").write_text("- Pushed\n")
+
+        status = self.manager.sync(push=True)
+
+        local_head = self.git("rev-parse", "HEAD")
+        remote_head = subprocess.run(
+            ["git", "--git-dir", str(remote), "rev-parse", "main"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        self.assertEqual(remote_head, local_head)
+        self.assertEqual(status["lastAction"], "Graph committed and pushed")
 
 
 if __name__ == "__main__":

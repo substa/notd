@@ -5302,6 +5302,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   let documentationLoaded = false;
   let documentationReturnFocus = null;
+  let gitSettingsTimer = null;
   async function loadDocumentation() {
     if (documentationLoaded) return;
     documentationContent.innerHTML = "<p>Loading documentation…</p>";
@@ -5365,12 +5366,96 @@ Open, save, export, and reach recent documents or headings from the command pale
         .join("") || '<p class="task-dashboard-empty">No shortcuts found</p>';
   }
 
+  function gitSyncSettings() {
+    const value = currentSettings().gitSync;
+    return value && typeof value === "object"
+      ? value
+      : { autoCommit: false, autoPush: false, debounceSeconds: 10 };
+  }
+
+  function updateGitSettingsControls() {
+    const settings = gitSyncSettings();
+    $("#settingsGitAutoCommit").checked = Boolean(settings.autoCommit);
+    $("#settingsGitAutoPush").checked = Boolean(settings.autoPush);
+    $("#settingsGitDelay").value = String(
+      [5, 10, 30, 60].includes(Number(settings.debounceSeconds))
+        ? Number(settings.debounceSeconds)
+        : 10,
+    );
+    $("#gitSyncNow").textContent = settings.autoPush
+      ? "Commit and push now"
+      : "Commit now";
+  }
+
+  function saveGitSyncSettings() {
+    const gitSync = {
+      autoCommit: $("#settingsGitAutoCommit").checked,
+      autoPush: $("#settingsGitAutoPush").checked,
+      debounceSeconds: Number($("#settingsGitDelay").value),
+    };
+    saveSettings({ gitSync });
+    $("#gitSyncNow").textContent = gitSync.autoPush
+      ? "Commit and push now"
+      : "Commit now";
+    clearTimeout(gitSettingsTimer);
+    gitSettingsTimer = setTimeout(loadGitSettingsStatus, 500);
+  }
+
+  async function loadGitSettingsStatus() {
+    clearTimeout(gitSettingsTimer);
+    if (
+      documentationView.hidden ||
+      $("[data-settings-panel=git]").hidden ||
+      !graphStore?.isRemote
+    )
+      return;
+    const container = $("#gitSettingsStatus");
+    try {
+      const status = await graphStore.api("/git/status");
+      $("#gitSettingsBranch").textContent = status.branch || "—";
+      $("#gitSettingsUpstream").textContent =
+        status.upstream || "Not configured";
+      const controls = [
+        $("#settingsGitAutoCommit"),
+        $("#settingsGitAutoPush"),
+        $("#settingsGitDelay"),
+        $("#gitSyncNow"),
+      ];
+      controls.forEach((control) => {
+        control.disabled = !status.available || status.running;
+      });
+      let title = status.message || "Git repository ready";
+      if (status.running) title = "Git sync in progress…";
+      else if (status.pending) title = "Changes waiting to be committed";
+      else if (status.lastError) title = "Git sync failed";
+      else if (status.lastAction) title = status.lastAction;
+      const details = status.lastError
+        ? status.lastError
+        : status.lastSyncedAt
+          ? `Last update ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(status.lastSyncedAt)}`
+          : status.available
+            ? "No Git snapshot has been created in this session."
+            : "Initialize a Git repository for this graph to enable snapshots.";
+      $("strong", container).textContent = title;
+      $("small", container).textContent = details;
+      container.classList.toggle("error", Boolean(status.lastError));
+    } catch (error) {
+      $("strong", container).textContent = "Git status unavailable";
+      $("small", container).textContent =
+        error.message || "Could not contact the graph server.";
+      container.classList.add("error");
+    }
+    gitSettingsTimer = setTimeout(loadGitSettingsStatus, 2000);
+  }
+
   async function showSettings(tab = "general") {
     if (documentationView.hidden)
       documentationReturnFocus =
         activeMarkdownField() || document.activeElement;
     documentationView.hidden = false;
     app.classList.add("documentation-open");
+    $("#settingsGitTab").hidden = !graphStore?.isRemote;
+    if (tab === "git" && !graphStore?.isRemote) tab = "general";
     $$("[data-settings-tab]").forEach((button) =>
       button.classList.toggle("active", button.dataset.settingsTab === tab),
     );
@@ -5380,6 +5465,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     $("#settingsTheme").value = selectedTheme;
     $("#settingsAccent").value = selectedAccent;
     $("#settingsVim").checked = state.vimEnabled;
+    if (tab === "git") {
+      updateGitSettingsControls();
+      await loadGitSettingsStatus();
+    } else clearTimeout(gitSettingsTimer);
     if (tab === "shortcuts") renderShortcutSettings($("#shortcutSearch").value);
     if (tab === "documentation") await loadDocumentation();
     requestAnimationFrame(() =>
@@ -5393,6 +5482,7 @@ Open, save, export, and reach recent documents or headings from the command pale
 
   function closeDocumentation() {
     if (documentationView.hidden) return;
+    clearTimeout(gitSettingsTimer);
     documentationView.hidden = true;
     app.classList.remove("documentation-open");
     if (
@@ -6597,6 +6687,28 @@ Open, save, export, and reach recent documents or headings from the command pale
   $("#settingsVim").addEventListener("change", (event) =>
     setVimEnabled(event.target.checked, false),
   );
+  [
+    "#settingsGitAutoCommit",
+    "#settingsGitAutoPush",
+    "#settingsGitDelay",
+  ].forEach((selector) =>
+    $(selector).addEventListener("change", saveGitSyncSettings),
+  );
+  $("#gitSyncNow").addEventListener("click", async () => {
+    const button = $("#gitSyncNow");
+    button.disabled = true;
+    try {
+      await graphStore.api("/git/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ push: $("#settingsGitAutoPush").checked }),
+      });
+    } catch (error) {
+      toast(error.message || "Git sync failed");
+    } finally {
+      await loadGitSettingsStatus();
+    }
+  });
   $("#shortcutSearch").addEventListener("input", (event) =>
     renderShortcutSettings(event.target.value),
   );
