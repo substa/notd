@@ -163,9 +163,20 @@
             placeholder="Find in document"
             aria-label="Find"
           />
-          <button id="findPrev" aria-label="Previous">↑</button
-          ><button id="findNext" aria-label="Next">↓</button>
-          <button id="findClose" aria-label="Close">×</button>
+          <span id="findCount" class="find-count" aria-live="polite"></span>
+          <button
+            id="findPrev"
+            aria-label="Previous occurrence"
+            aria-keyshortcuts="Shift+Enter Control+Shift+G Meta+Shift+G"
+            title="Previous occurrence (Shift+Enter)"
+          >↑</button
+          ><button
+            id="findNext"
+            aria-label="Next occurrence"
+            aria-keyshortcuts="Enter Control+G Meta+G"
+            title="Next occurrence (Enter)"
+          >↓</button>
+          <button id="findClose" aria-label="Close search">×</button>
         </div>
 
         <div class="notd-wrap" id="notdWrap">

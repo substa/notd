@@ -60,6 +60,14 @@ Open the command palette with:
 
 Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, manage graph maintenance, and open this documentation.
 
+## Find in the current document
+
+Press `⌘/Ctrl + F` and start typing to highlight every occurrence in the current document. The counter shows the selected occurrence and the total number of results.
+
+- Next occurrence: `Enter` or `⌘/Ctrl + G`;
+- previous occurrence: `Shift + Enter` or `⌘/Ctrl + Shift + G`;
+- close search: `Escape`.
+
 ## Settings
 
 Open the page menu from the gear icon at the right side of the footer. It provides **New page**, **Delete page** when the current page can be deleted, **Page history**, **Settings**, **Shortcuts**, and **Documentation**. You can also open Settings directly with `⌘/Ctrl + ,`.

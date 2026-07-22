@@ -623,11 +623,31 @@ svg {
   background: transparent;
   font-size: 12px;
 }
+.find-count {
+  min-width: 42px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
 .findbar button {
   border: 0;
   background: transparent;
   color: #888;
   padding: 4px 6px;
+}
+.findbar button:disabled {
+  opacity: 0.35;
+}
+::highlight(document-search) {
+  color: inherit;
+  background-color: rgb(245 198 66 / 35%);
+  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+::highlight(document-search-current) {
+  color: inherit;
+  background-color: rgb(245 168 35 / 65%);
+  background-color: color-mix(in srgb, var(--accent) 58%, transparent);
 }
 .menu {
   position: fixed;

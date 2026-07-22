@@ -130,6 +130,18 @@
       keys: "Mod+F",
     },
     {
+      id: "findNext",
+      section: "Documents",
+      label: "Next search occurrence",
+      keys: "Mod+G",
+    },
+    {
+      id: "findPrevious",
+      section: "Documents",
+      label: "Previous search occurrence",
+      keys: "Mod+Shift+G",
+    },
+    {
       id: "source",
       section: "Documents",
       label: "Toggle Markdown source",
@@ -5474,17 +5486,181 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
   }
 
+  let findMatches = [];
+  let currentFindMatch = -1;
+  let findRefreshFrame = 0;
+
+  function clearFindHighlights() {
+    if (globalThis.CSS?.highlights) {
+      CSS.highlights.delete("document-search");
+      CSS.highlights.delete("document-search-current");
+    }
+  }
+
+  function closeFind() {
+    $("#findbar").hidden = true;
+    cancelAnimationFrame(findRefreshFrame);
+    findRefreshFrame = 0;
+    findMatches = [];
+    currentFindMatch = -1;
+    clearFindHighlights();
+    $("#findCount").textContent = "";
+  }
+
+  function searchTextControl(control, query, matches) {
+    const text = control.value.toLocaleLowerCase();
+    let index = 0;
+    while ((index = text.indexOf(query, index)) !== -1) {
+      matches.push({ control, start: index, end: index + query.length });
+      index += Math.max(1, query.length);
+    }
+  }
+
+  function searchDom(root, query, matches) {
+    let text = "";
+    const segments = [];
+    const blockTags = new Set([
+      "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DIV", "DETAILS",
+      "FIGCAPTION", "FIGURE", "FOOTER", "H1", "H2", "H3", "H4", "H5",
+      "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE",
+      "SECTION", "TABLE", "TR", "UL",
+    ]);
+    const visit = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (!node.data) return;
+        const start = text.length;
+        text += node.data;
+        segments.push({ node, start, end: text.length });
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const element = node;
+      if (
+        element.hidden ||
+        /^(SCRIPT|STYLE|INPUT|TEXTAREA|SELECT)$/.test(element.tagName) ||
+        element.matches(".collapsed > .block-children, details:not([open]) > :not(summary)")
+      ) return;
+      if (element.tagName === "BR") text += "\n";
+      else for (const child of element.childNodes) visit(child);
+      if (blockTags.has(element.tagName) && text && !text.endsWith("\n"))
+        text += "\n";
+    };
+    visit(root);
+
+    const segmentAt = (offset) => {
+      let low = 0;
+      let high = segments.length - 1;
+      while (low <= high) {
+        const middle = (low + high) >> 1;
+        const segment = segments[middle];
+        if (offset < segment.start) high = middle - 1;
+        else if (offset >= segment.end) low = middle + 1;
+        else return segment;
+      }
+      return null;
+    };
+    const normalized = text.toLocaleLowerCase();
+    let index = 0;
+    while ((index = normalized.indexOf(query, index)) !== -1) {
+      const end = index + query.length;
+      const first = segmentAt(index);
+      const last = segmentAt(end - 1);
+      if (first && last) {
+        const range = document.createRange();
+        range.setStart(first.node, index - first.start);
+        range.setEnd(last.node, end - last.start);
+        matches.push({ range });
+      }
+      index += Math.max(1, query.length);
+    }
+  }
+
+  function paintFindHighlights() {
+    clearFindHighlights();
+    if (!globalThis.CSS?.highlights || !globalThis.Highlight) return;
+    const all = new Highlight();
+    for (const match of findMatches) if (match.range) all.add(match.range);
+    CSS.highlights.set("document-search", all);
+    const current = findMatches[currentFindMatch];
+    if (current?.range)
+      CSS.highlights.set("document-search-current", new Highlight(current.range));
+  }
+
+  function updateFindCount() {
+    const count = findMatches.length;
+    $("#findCount").textContent = count
+      ? `${currentFindMatch + 1}/${count}`
+      : $("#findInput").value ? "0/0" : "";
+    $("#findNext").disabled = !count;
+    $("#findPrev").disabled = !count;
+  }
+
+  function updateDocumentSearch() {
+    cancelAnimationFrame(findRefreshFrame);
+    findRefreshFrame = 0;
+    findMatches = [];
+    currentFindMatch = -1;
+    clearFindHighlights();
+    const query = $("#findInput").value.toLocaleLowerCase();
+    if (query) {
+      if (state.sourceMode) searchTextControl(sourceEditor, query, findMatches);
+      else {
+        const root = state.graphMode ? outliner : editor;
+        searchDom(root, query, findMatches);
+        $$('textarea', root).forEach((control) =>
+          searchTextControl(control, query, findMatches),
+        );
+      }
+      if (findMatches.length) currentFindMatch = 0;
+    }
+    paintFindHighlights();
+    updateFindCount();
+  }
+
+  function scheduleDocumentSearch() {
+    if ($("#findbar").hidden || findRefreshFrame) return;
+    findRefreshFrame = requestAnimationFrame(updateDocumentSearch);
+  }
+
   function showFind() {
     $("#findbar").hidden = false;
+    updateDocumentSearch();
     $("#findInput").focus();
     $("#findInput").select();
   }
-  function find(direction = false) {
-    const value = $("#findInput").value;
-    if (!value) return;
-    if (window.find)
-      window.find(value, false, direction, true, false, false, false);
+
+  function moveFind(direction = 1) {
+    if ($("#findbar").hidden) showFind();
+    if (!findMatches.length) return;
+    currentFindMatch =
+      (currentFindMatch + direction + findMatches.length) % findMatches.length;
+    paintFindHighlights();
+    updateFindCount();
+    const match = findMatches[currentFindMatch];
+    if (match.control) {
+      match.control.focus({ preventScroll: true });
+      match.control.setSelectionRange(match.start, match.end);
+      const lineHeight = parseFloat(getComputedStyle(match.control).lineHeight);
+      const line = match.control.value.slice(0, match.start).split("\n").length;
+      match.control.scrollTop = Math.max(
+        0,
+        line * lineHeight - match.control.clientHeight / 2,
+      );
+    } else {
+      match.range.startContainer.parentElement?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+    }
   }
+
+  new MutationObserver(scheduleDocumentSearch).observe(notdWrap, {
+    childList: true,
+    characterData: true,
+    subtree: true,
+  });
+  notdWrap.addEventListener("input", scheduleDocumentSearch);
 
   let documentationLoaded = false;
   let documentationReturnFocus = null;
@@ -7738,16 +7914,17 @@ Open, save, export, and reach recent documents or headings from the command pale
     setVimEnabled(Boolean(graphSettings.vimEnabled), false, false);
   }
 
+  $("#findInput").addEventListener("input", updateDocumentSearch);
   $("#findInput").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") find(event.shiftKey);
-    if (event.key === "Escape") $("#findbar").hidden = true;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      moveFind(event.shiftKey ? -1 : 1);
+    }
+    if (event.key === "Escape") closeFind();
   });
-  $("#findNext").addEventListener("click", () => find(false));
-  $("#findPrev").addEventListener("click", () => find(true));
-  $("#findClose").addEventListener(
-    "click",
-    () => ($("#findbar").hidden = true),
-  );
+  $("#findNext").addEventListener("click", () => moveFind(1));
+  $("#findPrev").addEventListener("click", () => moveFind(-1));
+  $("#findClose").addEventListener("click", closeFind);
 
   $("#confirmDialog").addEventListener("click", async (event) => {
     const action = event.target.dataset.dialog;
@@ -7840,6 +8017,8 @@ Open, save, export, and reach recent documents or headings from the command pale
       ["open", () => requestAction(openFile)],
       ["new", () => requestAction(newDocument)],
       ["find", showFind],
+      ["findNext", () => moveFind(1)],
+      ["findPrevious", () => moveFind(-1)],
       ["bold", () => wrapMarkdownSelection("**")],
       ["italic", () => wrapMarkdownSelection("*")],
       ["code", () => wrapMarkdownSelection("`")],
@@ -7851,7 +8030,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       action[1]();
       return;
     }
-    if (event.key === "Escape") $("#findbar").hidden = true;
+    if (event.key === "Escape") closeFind();
   });
 
   window.addEventListener("beforeunload", (event) => {
