@@ -632,7 +632,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if (parsed.path.startswith("/assets/") or parsed.path.startswith("/api/graph")) and not self.require_api_access(parsed):
             return
-        if parsed.path.startswith("/assets/") and self.graph:
+        if parsed.path.startswith("/assets/") and parsed.path not in STATIC_FILES and self.graph:
             try:
                 target = self.graph_asset_path(parsed.path.lstrip("/"))
                 if not target.is_file():
