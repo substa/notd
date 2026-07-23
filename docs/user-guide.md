@@ -423,7 +423,7 @@ Check the graph for accidentally nested copies such as `pages/pages/` or `journa
 
 ### Mobile shortcut toolbar is missing
 
-The indentation, movement, undo/redo, `[[ ]]`, and `(( ))` toolbar appears while editing a graph block on a touch device. In the installed PWA it is positioned above the software keyboard. Close and reopen the current block after rotating the device or reconnecting a hardware keyboard.
+The task, indentation, movement, undo/redo, `[[ ]]`, and `(( ))` toolbar appears while editing a graph block on a touch device. In the installed PWA it is positioned above the software keyboard. Close and reopen the current block after rotating the device or reconnecting a hardware keyboard.
 
 ### Local graph does not reopen
 

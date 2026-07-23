@@ -3352,13 +3352,15 @@ Open, save, export, and reach recent documents or headings from the command pale
           : content.replace(/^[A-Z]+/, "TODO");
   }
 
-  function toggleGraphTask(block, focus = true) {
+  function toggleGraphTask(block, focus = true, keepEmptyTaskSpace = false) {
     const before = block.content.match(
       /^(TODO|DOING|DONE|LATER|NOW|WAITING|CANCELED|CANCELLED)(?:\s+|$)/,
     )?.[1];
     block.content = cycledTaskContent(block.content);
     const after = block.content.match(/^(TODO|DOING|DONE)(?:\s+|$)/)?.[1];
     block.content = updateTaskCompletionMetadata(block.content, after);
+    if (!before && keepEmptyTaskSpace && block.content === "TODO")
+      block.content += " ";
     if (before && after)
       recordTaskHistory(
         state.graphPage?.path,
@@ -6765,6 +6767,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     const action = button.dataset.blockAction;
     if (action === "undo" || action === "redo") {
       applyAppHistory(action === "redo");
+      return;
+    }
+    if (action === "task") {
+      toggleGraphTask(block, true, true);
       return;
     }
     const snapshot = captureVimSnapshot(field);
