@@ -1931,9 +1931,6 @@ svg {
   margin: 56px 0 0;
   text-align: center;
 }
-.on-this-day-featured {
-  margin: 24px 0 42px;
-}
 .on-this-day-toggle {
   display: inline-flex;
   align-items: center;
@@ -1948,9 +1945,6 @@ svg {
 }
 .on-this-day-toggle:hover {
   color: var(--accent);
-}
-.on-this-day-featured .on-this-day-toggle:hover {
-  color: var(--muted);
 }
 .on-this-day-list {
   width: 100%;

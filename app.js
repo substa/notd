@@ -1464,13 +1464,18 @@ Open, save, export, and reach recent documents or headings from the command pale
     return {
       overdue: tasks
         .filter(
-          (task) => !task.done && task.scheduled && task.scheduled < today,
+          (task) =>
+            !task.done &&
+            !task.progress &&
+            task.scheduled &&
+            task.scheduled < today,
         )
         .sort(compareScheduledTasks),
       today: tasks
         .filter(
           (task) =>
             !task.done &&
+            !task.progress &&
             (task.scheduled === today ||
               (!task.scheduled && task.page.journalDate === today)),
         )
@@ -1479,12 +1484,15 @@ Open, save, export, and reach recent documents or headings from the command pale
         .filter((task) => !task.done && task.progress)
         .sort(compareScheduledTasks),
       next: tasks
-        .filter((task) => !task.done && task.scheduled > today)
+        .filter(
+          (task) => !task.done && !task.progress && task.scheduled > today,
+        )
         .sort(compareScheduledTasks),
       thisWeek: tasks
         .filter(
           (task) =>
             !task.done &&
+            !task.progress &&
             task.scheduled >= today &&
             task.scheduled <= endOfWeek,
         )
@@ -1492,11 +1500,17 @@ Open, save, export, and reach recent documents or headings from the command pale
       nextWeek: tasks
         .filter(
           (task) =>
-            !task.done && task.scheduled > today && task.scheduled <= week,
+            !task.done &&
+            !task.progress &&
+            task.scheduled > today &&
+            task.scheduled <= week,
         )
         .sort(compareScheduledTasks),
       unscheduled: tasks
-        .filter((task) => !task.done && !task.scheduled && !task.later)
+        .filter(
+          (task) =>
+            !task.done && !task.progress && !task.scheduled && !task.later,
+        )
         .sort(compareTaskFallback),
       later: tasks
         .filter((task) => !task.done && task.later)
@@ -1535,7 +1549,10 @@ Open, save, export, and reach recent documents or headings from the command pale
     const today = uniqueTasks(groups.overdue, groups.today).filter((task) =>
       !progressIds.has(taskId(task)),
     );
-    return { today, progress: groups.progress };
+    return {
+      today: [...today, ...groups.progress],
+      progress: groups.progress,
+    };
   }
 
   function taskSummary() {
@@ -1648,9 +1665,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (!histories.length) return null;
     const wrapper = document.createElement("section");
     wrapper.className = `on-this-day${featured ? " on-this-day-featured" : ""}`;
-    const toggle = document.createElement(featured ? "h2" : "button");
-    if (!featured) {
-      toggle.type = "button";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    if (featured) {
+      toggle.dataset.onThisDayDismiss = "";
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.setAttribute("aria-label", "Hide on this day timeline");
+    } else {
       toggle.dataset.onThisDayToggle = "";
       toggle.setAttribute("aria-expanded", String(expanded));
     }
@@ -1720,10 +1741,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     );
     const panel = document.createElement("section");
     panel.className = "journal-task-panel";
-    const sections = [
-      ["Today", overview.today],
-      ["In progress", overview.progress],
-    ];
+    const sections = [["Today", overview.today]];
     panel.innerHTML = `${sections.map(([label, tasks]) => `<details class="task-dashboard-group" open><summary><span>${label}</span><span class="task-section-count">${tasks.length}</span></summary>${taskRowsHtml(tasks)}</details>`).join("")}<button type="button" class="journal-all-tasks" data-task-filter="all">All tasks</button>`;
     return panel;
   }
@@ -1762,9 +1780,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const collapsed = new Set(["later", "unscheduled", "done"]);
     const sectionHtml = ([key, label]) => {
       const tasks =
-        key === "today"
-          ? uniqueTasks(groups.overdue, groups.today, groups.progress)
-          : groups[key];
+        key === "today" ? taskOverviewGroups(groups).today : groups[key];
       const limit = state.taskLimits[key] || 10;
       const remaining = tasks.length - limit;
       const more =
@@ -2713,7 +2729,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     return tasks
       .map(
         (task) =>
-          `<button type="button" class="calendar-task" data-calendar-task-page="${escapeHtml(task.page.path)}" data-calendar-task-block="${escapeHtml(task.block.id)}"><span aria-hidden="true"></span><b>${task.scheduled && task.scheduled < today ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ""}${escapeHtml(task.text || "Untitled task")}</b></button>`,
+          `<button type="button" class="calendar-task" data-calendar-task-page="${escapeHtml(task.page.path)}" data-calendar-task-block="${escapeHtml(task.block.id)}"><span${task.progress ? ' class="calendar-task-progress"' : ""} aria-hidden="true"></span><b>${task.scheduled && task.scheduled < today ? '<i class="task-overdue-icon" title="Overdue" aria-label="Overdue">!</i>' : ""}${escapeHtml(task.text || "Untitled task")}</b></button>`,
       )
       .join("");
   }
@@ -2754,7 +2770,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       return;
     }
     const overview = taskOverviewGroups();
-    calendarTasks.innerHTML = `<section><h3>Today <span>${overview.today.length}</span></h3>${calendarTaskRowsHtml(overview.today)}</section><section><h3>In progress <span>${overview.progress.length}</span></h3>${calendarTaskRowsHtml(overview.progress)}</section><button type="button" class="calendar-all-tasks" data-calendar-all-tasks>All tasks <span aria-hidden="true">→</span></button>`;
+    calendarTasks.innerHTML = `<section><h3>Today <span>${overview.today.length}</span></h3>${calendarTaskRowsHtml(overview.today)}</section><button type="button" class="calendar-all-tasks" data-calendar-all-tasks>All tasks <span aria-hidden="true">→</span></button>`;
   }
 
   function focusCalendarDate(date) {
@@ -7709,6 +7725,12 @@ Open, save, export, and reach recent documents or headings from the command pale
         await loadGraphPage(page, {
           blockId: onThisDayBlock.dataset.onThisDayBlock,
         });
+      return;
+    }
+    if (event.target.closest("[data-on-this-day-dismiss]")) {
+      state.onThisDayEmptyDismissed = true;
+      state.onThisDayExpanded = false;
+      renderGraphPage();
       return;
     }
     if (event.target.closest("[data-on-this-day-toggle]")) {

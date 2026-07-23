@@ -632,6 +632,9 @@ body {
   border-radius: 50%;
   background: var(--muted);
 }
+.calendar-task > span.calendar-task-progress {
+  background: var(--accent);
+}
 .calendar-task b {
   overflow: hidden;
   font: 400 11px/1.35 var(--body);
