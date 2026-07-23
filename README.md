@@ -1,4 +1,8 @@
-# notd
+<p align="center">
+  <img src="assets/icons/notd.svg" width="144" height="144" alt="notd logo">
+</p>
+
+<h1 align="center">notd</h1>
 
 notd is a local-first Markdown editor and Logseq-compatible outliner that runs without a framework, build step, or external service. It supports standalone documents, filesystem-backed graphs, daily journals, references, tasks, attachments, offline use, and an optional server for sharing one graph across trusted devices.
 

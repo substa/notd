@@ -1,4 +1,4 @@
-const CACHE = "notd-editor-v34";
+const CACHE = "notd-editor-v35";
 const ASSET_CACHE = "notd-graph-assets-v1";
 const SETTINGS_CACHE = "notd-pwa-settings-v1";
 const MAX_ASSET_ENTRIES = 100;
@@ -19,6 +19,7 @@ const ASSETS = [
   "./docs/deployment.md",
   "./manifest.webmanifest",
   "./apple-touch-icon.png",
+  "./assets/icons/notd.svg",
   "./assets/icons/favicon.ico",
   "./assets/icons/favicon-16x16.png",
   "./assets/icons/favicon-32x32.png",

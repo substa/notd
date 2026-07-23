@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>notd 02E8-L1 thin</title>
+  <desc>Minimal iOS-style app icon with a thinner stylized N and a left-side dot.</desc>
+
+  <defs>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --border: #e7e7ea;
+        --ink: #0f0f10;
+      }
+      .tile {
+        fill: var(--bg);
+        stroke: var(--border);
+        stroke-width: 4;
+      }
+      .mark {
+        fill: none;
+        stroke: var(--ink);
+        stroke-width: 38;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .dot {
+        fill: var(--ink);
+      }
+    </style>
+  </defs>
+
+  <rect class="tile" x="145" y="145" width="734" height="734" rx="165" ry="165"/>
+
+  <path class="mark" d="M 334 668 L 334 356 L 695 726 L 695 356"/>
+
+  <!-- Diameter exactly equal to line thickness -->
+  <circle class="dot" cx="334" cy="738" r="19"/>
+</svg>
