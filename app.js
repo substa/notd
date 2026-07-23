@@ -19,6 +19,42 @@
     window.innerHeight,
     window.visualViewport?.height || 0,
   );
+  let mobileBlockScrollFrame = 0;
+  const keepActiveMobileBlockVisible = () => {
+    cancelAnimationFrame(mobileBlockScrollFrame);
+    mobileBlockScrollFrame = requestAnimationFrame(() => {
+      const field = activeGraphBlock?.field;
+      if (
+        !field?.isConnected ||
+        !mobileBlockToolbar.classList.contains("keyboard-visible")
+      )
+        return;
+      const viewport = window.visualViewport;
+      const wrapBounds = notdWrap.getBoundingClientRect();
+      const toolbarBounds = mobileBlockToolbar.getBoundingClientRect();
+      const visibleTop = Math.max(
+        wrapBounds.top,
+        viewport?.offsetTop || 0,
+      );
+      const visibleBottom = Math.min(
+        wrapBounds.bottom,
+        (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight),
+        toolbarBounds.top,
+      );
+      const bounds = field.getBoundingClientRect();
+      const padding = 12;
+      let delta = 0;
+      if (bounds.bottom > visibleBottom - padding)
+        delta = bounds.bottom - visibleBottom + padding;
+      else if (bounds.top < visibleTop + padding)
+        delta = bounds.top - visibleTop - padding;
+      if (Math.abs(delta) > 1)
+        notdWrap.scrollTo({
+          top: Math.max(0, notdWrap.scrollTop + delta),
+          behavior: "smooth",
+        });
+    });
+  };
   const updateMobileToolbarPosition = () => {
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -30,14 +66,16 @@
         window.innerHeight,
         viewportBottom,
       );
-    mobileBlockToolbar.style.setProperty(
-      "--keyboard-inset",
-      `${keyboardInset >= 80 ? keyboardInset : 0}px`,
-    );
     mobileBlockToolbar.classList.toggle(
       "keyboard-visible",
       keyboardInset >= 80,
     );
+    const toolbarHeight = mobileBlockToolbar.getBoundingClientRect().height;
+    if (toolbarHeight) {
+      mobileBlockToolbar.style.top = `${viewportBottom - toolbarHeight}px`;
+      mobileBlockToolbar.style.bottom = "auto";
+    }
+    keepActiveMobileBlockVisible();
   };
   const documentationView = $("#settingsView");
   const documentationContent = $("#documentationContent");
@@ -2085,6 +2123,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     mobileBlockToolbar.hidden = false;
     updateMobileToolbarPosition();
     resizeGraphEditor(field);
+    keepActiveMobileBlockVisible();
     const caret =
       position === null
         ? field.value.length
@@ -3205,6 +3244,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     location.block.content = field.value;
     activeGraphBlock.block = location.block;
     resizeGraphEditor(field);
+    keepActiveMobileBlockVisible();
     graphChanged();
     showGraphAutocomplete(field);
   }
