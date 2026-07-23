@@ -1,12 +1,8 @@
 <p align="center">
-  <img src="assets/icons/notd.svg" width="144" height="144" alt="notd logo"><br>
-  <h1 align="center">notd</h1>
-  <h6 align="center">not overloaded, totally deterministic</h6>
+  <img src="assets/icons/notd.svg" width="144" height="144" alt="notd logo">
 </p>
 
-
-<br>
-notd is a local-first, minimal, markdown outliner. It supports standalone documents, filesystem-backed graphs, daily journals, references, tasks, attachments, offline use, and an optional server for sharing one graph across trusted devices.
+**notd** is a minimal, private, markdown outliner. It supports standalone documents, filesystem-backed graphs, daily journals, references, tasks, attachments, offline use, and an optional server for sharing one graph across trusted devices.
 <br><br>
 
 > [!IMPORTANT]
