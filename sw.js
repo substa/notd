@@ -1,4 +1,4 @@
-const CACHE = "notd-editor-v35";
+const CACHE = "notd-editor-v36";
 const ASSET_CACHE = "notd-graph-assets-v1";
 const SETTINGS_CACHE = "notd-pwa-settings-v1";
 const MAX_ASSET_ENTRIES = 100;

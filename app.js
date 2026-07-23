@@ -1564,7 +1564,10 @@ Open, save, export, and reach recent documents or headings from the command pale
   function taskSummary() {
     const groups = taskGroups();
     const overview = taskOverviewGroups(groups);
-    return { today: overview.today.length, progress: overview.progress.length };
+    return {
+      today: overview.today.filter((task) => !task.progress).length,
+      progress: overview.progress.length,
+    };
   }
 
   function taskRowsHtml(items) {
