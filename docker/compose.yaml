@@ -1,7 +1,10 @@
+name: notd
+
 services:
   notd:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       target: "${NOTD_DOCKER_TARGET:-runtime}"
     image: notd:local
     container_name: notd

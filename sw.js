@@ -1,4 +1,5 @@
-const CACHE = "notd-editor-v40";
+// Keep the application shell separate from bounded, user-opened graph assets.
+const CACHE = "notd-editor-v41";
 const ASSET_CACHE = "notd-graph-assets-v1";
 const SETTINGS_CACHE = "notd-pwa-settings-v1";
 const MAX_ASSET_ENTRIES = 100;
@@ -18,7 +19,6 @@ const ASSETS = [
   "./docs/user-guide.md",
   "./docs/deployment.md",
   "./manifest.webmanifest",
-  "./apple-touch-icon.png",
   "./assets/icons/notd.svg",
   "./assets/icons/favicon.ico",
   "./assets/icons/favicon-16x16.png",
@@ -32,6 +32,7 @@ const STATIC_PATHS = new Set(
   ASSETS.map((path) => new URL(path, self.location.href).pathname),
 );
 
+// Precache the complete shell so startup never depends on partial asset availability.
 self.addEventListener("install", (event) =>
   event.waitUntil(
     caches
@@ -99,6 +100,7 @@ self.addEventListener("message", (event) => {
     event.waitUntil(setMaxAssetBytes(event.data.maxBytes));
 });
 
+// Network refreshes reinsert assets, making cache insertion order an approximate LRU.
 async function trimAssetCache(cache) {
   const [requests, byteLimit] = await Promise.all([
     cache.keys(),

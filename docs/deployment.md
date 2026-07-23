@@ -26,11 +26,16 @@ sudo mkdir -p /opt/notd
 sudo chown "$USER":"$USER" /opt/notd
 ```
 
-Then either download a release/source archive from GitHub, extract it into `/opt/notd`, and run `cd /opt/notd`, or clone the repository:
+Then either download a release/source archive from GitHub and extract it into `/opt/notd`, or clone the repository:
 
 ```bash
 git clone YOUR_REPOSITORY_URL /opt/notd
-cd /opt/notd
+```
+
+Docker deployment files are kept together in one predictable directory:
+
+```bash
+cd /opt/notd/docker
 ```
 
 The clone method requires you to [install Git](https://git-scm.com/downloads) separately. Git is not required when using an archive and is not required for editing, saving, offline synchronization, or backups.
@@ -106,7 +111,7 @@ A manual attachment may be lost if the Newt container is recreated, so update it
 
 ## 4. Build and start notd
 
-From `/opt/notd`:
+From `/opt/notd/docker`:
 
 ```bash
 docker compose up -d --build
@@ -176,14 +181,15 @@ If the source was cloned with a separately installed Git client:
 ```bash
 cd /opt/notd
 git pull --ff-only
+cd docker
 docker compose up -d --build --remove-orphans
 docker image prune -f
 ```
 
-For an archive installation, download the new archive, verify that `.env` and the graph are backed up, replace only the application source files in `/opt/notd`, and run:
+For an archive installation, download the new archive, verify that `docker/.env` and the graph are backed up, replace only the application source files in `/opt/notd`, and run:
 
 ```bash
-cd /opt/notd
+cd /opt/notd/docker
 docker compose up -d --build --remove-orphans
 docker image prune -f
 ```
@@ -191,6 +197,8 @@ docker image prune -f
 Then open notd while online, close the PWA completely, and reopen it so the new Service Worker takes control.
 
 ## 8. Stop, restart, and inspect
+
+Run these commands from `/opt/notd/docker`:
 
 ```bash
 # Restart

@@ -17,6 +17,7 @@ The root layout is deliberate: the browser receives the same files that a develo
 | `theme-config.css` | Theme variables and intentionally easy overrides. |
 | `sw.js` | Static shell and bounded attachment cache; graph API data is not broadly cached. |
 | `server.py` | Static allowlist, graph API, atomic writes, conflict checks, events, and optional Git integration. |
+| `docker/` | Container image, Compose deployment, environment template, and build exclusions. |
 | `tests/` | DOM-independent JavaScript behavior and Python server security/integration tests. |
 
 ## Data flow
@@ -56,6 +57,6 @@ A new browser runtime file normally needs to be added in four places:
 1. `index.html` if it is loaded by the page;
 2. `server.py`'s `STATIC_FILES` allowlist;
 3. `sw.js`'s `ASSETS` list, followed by a cache-name increment;
-4. `Dockerfile` so container builds copy it.
+4. `docker/Dockerfile` so container builds copy it.
 
 Add tests and update documentation in the same change.

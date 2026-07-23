@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  // Keep DOM lookup helpers small because the application has no component framework.
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [
     ...root.querySelectorAll(selector),
@@ -20,6 +21,7 @@
     window.visualViewport?.height || 0,
   );
   let mobileBlockScrollFrame = 0;
+  // Keep the active block above both the software keyboard and the mobile toolbar.
   const keepActiveMobileBlockVisible = () => {
     cancelAnimationFrame(mobileBlockScrollFrame);
     mobileBlockScrollFrame = requestAnimationFrame(() => {
@@ -55,6 +57,7 @@
         });
     });
   };
+  // VisualViewport coordinates are required because mobile keyboards do not resize every layout viewport.
   const updateMobileToolbarPosition = () => {
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -99,6 +102,7 @@
   let graphSettingsTimer = null;
   const currentSettings = () => graphSettings || localSettings();
 
+  // Centralize serializable view state; transient DOM and storage handles stay outside this object.
   let state = {
     markdown: "",
     fileHandle: null,
@@ -126,6 +130,7 @@
     taskLimits: {},
     taskExpanded: {},
   };
+  // Shortcut definitions drive matching, settings UI, and command-palette labels.
   const shortcutDefinitions = [
     {
       id: "settings",
@@ -1337,6 +1342,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     return journalDocuments.get(page.path);
   }
 
+  // Build task records from the graph index so every dashboard shares one source of truth.
   function graphTasks() {
     if (!graphIndex) return [];
     const tasks = [];
@@ -1462,6 +1468,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     );
   }
 
+  // Keep in-progress tasks separate here; overview views append them to Today in a stable order.
   function taskGroups(tasks = graphTasks()) {
     const today = taskDate();
     const week = taskDate(7);
@@ -1655,6 +1662,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     );
   }
 
+  // Render historical journal blocks without making those source pages editable in place.
   function onThisDayElement({
     expanded = state.onThisDayExpanded,
     featured = false,
@@ -1802,6 +1810,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     return dashboard;
   }
 
+  // Rebuild the outliner from the graph model after structural mutations.
   function renderGraphPage() {
     if (!state.graphMode || !state.graphDocument) return;
     activeGraphBlock = null;
@@ -2231,6 +2240,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   }
 
   let graphSaving = null;
+  // Persist recovery data before disk/server writes so interrupted saves can be resumed safely.
   async function flushGraphSave(interactive = false, force = false) {
     if (!state.graphMode || !state.graphPage || !state.dirty) return true;
     if (state.graphConflict && !force) {
@@ -2461,6 +2471,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     });
   }
 
+  // Page loading is the navigation boundary: save current work, update history, then render.
   async function loadGraphPage(pageOrTitle, options = {}) {
     if (!graphStore || !graphIndex) return;
     if (state.graphMode && state.dirty && !(await flushGraphSave(true))) return;
@@ -3756,6 +3767,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     return results;
   }
+  // Derive inline suggestions only from the text immediately before the caret.
   function showGraphAutocomplete(field) {
     const before = field.value.slice(0, field.selectionStart);
     const wikiMatch = before.match(/\[\[([^\]]*)$/);
@@ -7005,6 +7017,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   let pageDirectoryVisiblePages = [];
   const pageDirectoryGroupPages = new Map();
   const pageDirectoryExpandedGroups = new Set();
+  // Deduplicate physical and referenced pages before alphabetic grouping.
   function allDirectoryPages() {
     if (!graphIndex) return [];
     const collator = new Intl.Collator(undefined, {
@@ -7029,6 +7042,7 @@ Open, save, export, and reach recent documents or headings from the command pale
       .toLocaleUpperCase();
     return /^[A-Z]$/.test(letter) ? letter : "#";
   }
+  // Paginate each alphabetic group independently so all section counts remain visible.
   function renderPageDirectory() {
     const pages = allDirectoryPages();
     const query = $("#pageDirectoryFilter").value.trim().toLocaleLowerCase();
@@ -7696,6 +7710,7 @@ Open, save, export, and reach recent documents or headings from the command pale
   });
   let blockSwipe = null;
   let suppressBlockClickUntil = 0;
+  // Horizontal touch gestures mutate indentation while vertical movement remains native scrolling.
   const finishBlockSwipe = (event, canceled = false) => {
     const swipe = blockSwipe;
     if (!swipe || event.pointerId !== swipe.pointerId) return;

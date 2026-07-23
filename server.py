@@ -27,12 +27,26 @@ MAX_BODY = 8 * 1024 * 1024
 MAX_ASSET_BODY = 64 * 1024 * 1024
 MAX_GRAPH_FILES = 20_000
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
+# Serve an explicit application allowlist instead of exposing the repository root.
 STATIC_FILES = {
-    "/", "/index.html", "/styles.css", "/theme-config.css", "/graph.js", "/app.js",
-    "/docs/user-guide.md", "/docs/deployment.md", "/manifest.webmanifest", "/apple-touch-icon.png", "/assets/icons/favicon.ico",
-    "/assets/icons/favicon-16x16.png", "/assets/icons/favicon-32x32.png",
-    "/assets/icons/apple-touch-icon.png", "/assets/icons/icon-192.png",
-    "/assets/icons/icon-512.png", "/assets/icons/icon-maskable-512.png", "/sw.js",
+    "/",
+    "/index.html",
+    "/styles.css",
+    "/theme-config.css",
+    "/graph.js",
+    "/app.js",
+    "/sw.js",
+    "/manifest.webmanifest",
+    "/docs/user-guide.md",
+    "/docs/deployment.md",
+    "/assets/icons/notd.svg",
+    "/assets/icons/favicon.ico",
+    "/assets/icons/favicon-16x16.png",
+    "/assets/icons/favicon-32x32.png",
+    "/assets/icons/apple-touch-icon.png",
+    "/assets/icons/icon-192.png",
+    "/assets/icons/icon-512.png",
+    "/assets/icons/icon-maskable-512.png",
 }
 SAFE_INLINE_ASSET_TYPES = {
     "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
@@ -43,6 +57,8 @@ SAFE_INLINE_ASSET_TYPES = {
 
 
 class EventBroker:
+    """Fan graph-change events out to bounded per-client queues."""
+
     def __init__(self) -> None:
         self._subscribers: set[queue.Queue] = set()
         self._lock = threading.Lock()
@@ -73,6 +89,8 @@ class EventBroker:
 
 
 class GraphWatcher(threading.Thread):
+    """Poll graph metadata and publish only path and revision changes."""
+
     def __init__(self, graph: Path, broker: EventBroker, on_change=None) -> None:
         super().__init__(name="notd-graph-watcher", daemon=True)
         self.graph = graph
@@ -369,6 +387,7 @@ class GitSyncManager:
 
 
 def journal_config(graph: Path) -> dict[str, str]:
+    """Read supported legacy journal tokens while keeping defaults on failure."""
     defaults = {"fileNameFormat": "yyyy_MM_dd", "pageTitleFormat": "MMM do, yyyy"}
     try:
         content = (graph / "logseq" / "config.edn").read_text(encoding="utf-8")
@@ -383,6 +402,8 @@ def journal_config(graph: Path) -> dict[str, str]:
 
 
 class NotdHandler(SimpleHTTPRequestHandler):
+    """Serve the static shell and a same-origin, graph-scoped JSON API."""
+
     server_version = "notd/1"
     protocol_version = "HTTP/1.1"
 
@@ -466,6 +487,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
         self.json_response({"error": message}, status)
 
     def graph_path(self, raw_path: str, markdown_only: bool = False) -> Path:
+        """Resolve an API path beneath the graph root and reject symlink escapes."""
         if not self.graph:
             raise FileNotFoundError("No graph configured")
         relative = PurePosixPath(unquote(raw_path))
@@ -559,6 +581,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
         return payload
 
     def scan_graph(self) -> list[dict]:
+        """Return bounded note metadata and content for initial client indexing."""
         assert self.graph
         candidates: list[Path] = []
         candidates.extend(path for path in self.graph.iterdir() if path.is_file() and not path.is_symlink() and path.suffix.lower() in MARKDOWN_SUFFIXES)
@@ -762,6 +785,7 @@ class NotdHandler(SimpleHTTPRequestHandler):
             self.error_json(HTTPStatus.BAD_REQUEST, str(error))
 
     def atomic_write(self, target: Path, content: str) -> int:
+        """Flush a sibling temporary file before atomically replacing the target."""
         target.parent.mkdir(parents=True, exist_ok=True)
         mode = target.stat().st_mode & 0o777 if target.exists() else 0o644
         descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)

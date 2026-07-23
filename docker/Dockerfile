@@ -5,8 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Copy only files served at runtime; repository and development files stay outside the image.
 COPY server.py index.html app.js graph.js styles.css theme-config.css sw.js ./
-COPY manifest.webmanifest apple-touch-icon.png ./
+COPY manifest.webmanifest ./
 COPY docs/ ./docs/
 COPY assets/icons/ ./assets/icons/
 

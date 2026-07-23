@@ -8,6 +8,7 @@
   const nestedGraphCopy = (path) =>
     /^(pages|journals)\/\1\//i.test(String(path || "").replace(/\\/g, "/"));
 
+  // Normalize every page key once so links, aliases, and filenames resolve consistently.
   const normalizePage = (value) => {
     let normalized = String(value || "")
       .trim()
@@ -21,6 +22,7 @@
       .replace(/\s+/g, " ")
       .toLocaleLowerCase();
   };
+  // Resolve relative assets lexically; storage adapters enforce the final graph boundary.
   function resolveAssetPath(reference, fromFolder = "pages") {
     const raw = String(reference || "")
       .trim()
@@ -52,6 +54,7 @@
     return (result >>> 0).toString(36);
   };
 
+  // IndexedDB stores handles, drafts, and remote replicas without mixing their lifecycles.
   function openDatabase() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -131,6 +134,7 @@
       .filter(Boolean);
   }
 
+  // Parse indentation into a tree while retaining preamble metadata and unknown block text.
   function parseDocument(markdown = "") {
     const source = normalizePdfEmbeds(markdown).replace(/\r\n?/g, "\n");
     const lines = source.split("\n");
@@ -220,6 +224,7 @@
     return document;
   }
 
+  // Serialize the tree deterministically so structural edits produce small Markdown diffs.
   function serializeDocument(document) {
     const output = [...(document.preamble || [])];
     if (output.length && document.blocks?.length) output.push("");
@@ -247,6 +252,7 @@
     return result;
   }
 
+  // Reference scanners ignore fenced code to avoid indexing examples as real links.
   function pageReferences(text) {
     // Shell conditionals and other fenced code can contain `[[ … ]]`; they are not wiki links.
     const prose = String(text || "").replace(
@@ -287,6 +293,7 @@
     return decodedBase;
   }
 
+  // Produce portable filenames while keeping the readable title in Markdown metadata.
   function safeFilename(title) {
     return (
       String(title || "Untitled")
@@ -327,6 +334,7 @@
   const ordinal = (day) =>
     `${day}${day % 10 === 1 && day % 100 !== 11 ? "st" : day % 10 === 2 && day % 100 !== 12 ? "nd" : day % 10 === 3 && day % 100 !== 13 ? "rd" : "th"}`;
 
+  // Support the intentionally small journal token set used by graph configuration.
   function formatJournalDate(
     date,
     format = defaultJournalConfig.pageTitleFormat,
@@ -350,6 +358,7 @@
     );
   }
 
+  // Parse journal filenames without relying on locale-dependent date parsing.
   function parseJournalDate(
     filename,
     format = defaultJournalConfig.fileNameFormat,
@@ -401,6 +410,7 @@
     }
   }
 
+  // Keep direct filesystem access behind the same interface as remote graph storage.
   class GraphStore {
     constructor(handle) {
       this.handle = handle;
@@ -845,6 +855,7 @@
     }
   }
 
+  // Mirror remote notes locally and queue writes while the server is unavailable.
   class RemoteGraphStore {
     constructor(status, baseUrl = "/api/graph") {
       this.baseUrl = baseUrl;
@@ -1374,6 +1385,7 @@
     }
   }
 
+  // Own canonical pages, aliases, references, and UUID lookup tables.
   class GraphIndex {
     constructor(pages = []) {
       this.contentOverrides = new Map();

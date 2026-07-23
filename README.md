@@ -11,7 +11,7 @@ notd is a local-first, minimal, markdown outliner. It supports standalone docume
 
 > [!IMPORTANT]
 > **Disclaimer — notd is deliberately and strongly opinionated.**
-<br>For years, I’ve used [Logseq](https://github.com/logseq/logseq) to keep track of all my ideas, tasks, work, and any other information worth being able to search and revisit even years later. Over time, I refined my workflow to handle a large volume of data while relying on as few plugins or extra features as possible. Recently, Logseq decided to change direction with its database version, so I figured it was time to make use of all the Markdown files I’ve accumulated over the years with a simpler tool—one that works exactly the way I need it to.
+<br>For years, I’ve used [Logseq](https://github.com/logseq/logseq) to keep track of all my ideas, tasks, activities, works, clients, and any other information worth being able to search and revisit even years later. Over time, I refined my workflow to handle a large volume of data while relying on as few plugins or extra features as possible. Recently, Logseq decided to change direction with its database version, so I figured it was time to make use of all the Markdown files I’ve accumulated over the years with a simpler tool—one that works exactly the way I need it to.
 <br>No, I'm not kidding — you probably shouldn't use this software, unless, unfortunately for you, you happen to share the exact same mindset as me.
 <br>In addition, despite the fact that I use them every day, it's still a work in progress — expect some bugs along the way.
 <br><br>
@@ -154,6 +154,7 @@ python3 server.py --port 4176 --graph /absolute/path/to/graph
 ```text
 assets/icons/       Browser and PWA icons
 assets/screenshots/ README screenshots
+docker/             Container image, Compose stack, and environment template
 docs/               User, architecture, and deployment documentation
 tests/              Graph parser and index tests
 app.js              Browser application and interface behavior
@@ -164,8 +165,6 @@ theme-config.css     Theme variables and editorial overrides
 server.py            Optional writable graph server
 sw.js                Offline application cache
 manifest.webmanifest PWA metadata
-Dockerfile           Container image
-compose.yaml         Hardened server deployment
 ```
 
 The root application files are served directly. Keeping them at the root avoids generated output and makes the static deployment path identical to the source tree.
