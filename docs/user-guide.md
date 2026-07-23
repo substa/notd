@@ -1,6 +1,6 @@
 # notd — Documentation
 
-notd is a local Markdown editor, block outliner, and graph reader compatible with the essential Logseq file structure. Markdown files remain the source of truth; notd does not introduce a proprietary data format.
+notd is a local Markdown editor, block outliner, and reader for file-based graphs. Markdown files remain the source of truth; notd does not introduce a proprietary data format.
 
 ## Quick start
 
@@ -23,7 +23,7 @@ python3 server.py \
 
 Open `http://localhost:4176` on the server or `http://SERVER-IP:4176` from another device. Every client reads and writes the same files.
 
-> The graph API currently has no application authentication. Use it only on a trusted network and do not expose it directly to the internet. Username/password authentication should be added before public deployment.
+> The graph API has no application authentication. Use it only on a trusted network and never expose it directly to the internet. Remote deployment requires TLS and access control at a reverse proxy; every user admitted by that proxy can read and modify the complete graph.
 
 ## Installation and PWA
 
@@ -59,6 +59,8 @@ Open the command palette with:
 - `:` in Vim Normal mode.
 
 Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, manage graph maintenance, and open this documentation.
+
+Run **All pages** to open the page directory. Every alphabetical section is shown collapsed with its total page count and has independent pagination when it contains more than 50 pages; the filter updates results immediately and automatically expands matching sections. Select a title to open that page.
 
 ## Find in the current document
 
@@ -110,11 +112,9 @@ pages/
 journals/
   2026_07_17.md
 assets/
-logseq/
-  config.edn
 ```
 
-notd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Logseq aliases declared with `alias::` are searchable in the command palette; an alias result displays the canonical page title and opens that page. Logseq `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
+notd reads `.md` and `.markdown` files from the graph root, `pages/`, and `journals/`. It recognizes page titles, aliases, properties, page references, block UUIDs, and journal dates. Aliases declared with `alias::` are searchable in the command palette; an alias result displays the canonical page title and opens that page. `key:: value` properties—including custom fields such as `company::` and `name::`—remain preserved in Markdown source but are hidden from the formatted page when they have no visual representation.
 
 ### Open a page
 
@@ -132,13 +132,13 @@ Enter at least two characters to display page suggestions. If the page does not 
 
 ### Rename a page
 
-Use **Rename document** or `F2`, edit the title, then select the minimal checkmark icon to save. The adjacent trash icon deletes the current page after confirmation. notd can update matching `[[...]]` references throughout the graph. Case-only changes such as `test` to `Test` are supported, including on case-insensitive filesystems. Journal pages cannot be renamed or deleted, preserving Logseq compatibility.
+Use **Rename document** or `F2`, edit the title, then select the minimal checkmark icon to save. The adjacent trash icon deletes the current page after confirmation. notd can update matching `[[...]]` references throughout the graph. Case-only changes such as `test` to `Test` are supported, including on case-insensitive filesystems. Journal pages cannot be renamed or deleted, preserving journal invariants.
 
 ### Page history
 
-Page history and automatic Git snapshots are available only when the graph directory is already a Git repository and notd is running through `server.py`. notd does not initialize a repository automatically.
+Page history and automatic Git snapshots are optional. Every editing, saving, synchronization, offline, and backup feature continues to work when Git is absent. History is available only when the graph directory is already a Git repository, Git is installed separately in the `server.py` environment, and notd is running through `server.py`. notd does not install Git or initialize a repository automatically.
 
-For a graph that is not yet under version control, install Git and run the following commands once, replacing the path with the graph's location:
+For a graph that is not yet under version control, [install Git separately](https://git-scm.com/downloads) and run the following commands once, replacing the path with the graph's location. Docker users must also select the optional `runtime-git` image target described in the [deployment guide](./deployment.md):
 
 ```bash
 cd /absolute/path/to/graph
@@ -151,7 +151,7 @@ If Git requests an author name or email, configure them by following the officia
 
 After the initial commit, open **Settings → Git**. Automatic commits can group nearby graph changes into one snapshot after a delay of 5, 10, 30, or 60 seconds. Commit messages describe the staged changes, for example `Update Earth`, `Add journal 2026-07-22`, `Rename Old page to New page`, or `Update Earth and Marvin`. **Push after commit** publishes each snapshot through the current branch's configured upstream; Git credentials must already be available to the operating-system user running `server.py`. notd never stores Git credentials.
 
-Use **Commit now** or **Commit and push now** to create a snapshot without waiting for the delay. Changes made externally by applications such as Logseq are detected and included. Repository hooks are disabled for commits created by notd, preventing older `pre-commit` or `post-commit` automation from running twice.
+Use **Commit now** or **Commit and push now** to create a snapshot without waiting for the delay. Changes made externally by other applications are detected and included. Repository hooks are disabled for commits created by notd, preventing older `pre-commit` or `post-commit` automation from running twice.
 
 Automatic Git synchronization does not pull, rebase, force-push, or resolve conflicts. All editing devices are expected to use the same notd server. If remote history is changed independently, reconcile it manually before enabling push again. A push failure does not affect the saved Markdown files or the local commit.
 
@@ -247,15 +247,6 @@ The default filename is:
 journals/yyyy_MM_dd.md
 ```
 
-When a graph is opened for the first time, notd imports these compatible settings from `logseq/config.edn`:
-
-```clojure
-:journal/file-name-format
-:journal/page-title-format
-```
-
-The imported values are written to `.notd/settings.json`, which then becomes notd's source of truth. The original Logseq configuration is left unchanged, so an existing graph can be imported safely and subsequently managed by notd on every device.
-
 Previous journal pages appear below today's entry and load progressively while scrolling. Future journal pages are excluded from this feed and remain accessible by searching for their name or selecting their date in the mini calendar. Click a journal title to open that date as a single page. When previous-year entries exist and today's journal is empty, its first empty block is shown below the title and task count, followed by the **on this day** timeline. The timeline moves to a collapsible link at the bottom of today's entry as soon as the empty block receives focus; when no block is available, click the featured **on this day** title to collapse it manually. The timeline includes all top-level blocks created on the same month and day in previous years; blocks tagged `#worklog` are excluded. Inline formatting, page references, regular Markdown links, code, quotes, and attachments remain rendered inside the timeline. Timeline blocks with nested content can be expanded in place.
 
 ### Journal commands
@@ -349,7 +340,7 @@ If a file changes externally while local edits are pending, notd does not overwr
 When running through `server.py`:
 
 - saves are announced to connected browsers through Server-Sent Events;
-- edits made directly by Logseq are detected in about one second;
+- edits made directly by other applications are detected in about one second;
 - pages without pending local changes reload automatically;
 - pending local changes produce a conflict instead of being overwritten;
 - events contain only the path, change type, and file revision.
@@ -421,7 +412,7 @@ The installed PWA may still be displaying an obsolete cached shell. Open the sit
 
 ### Pages, suggestions, or linked references are duplicated
 
-Check the graph for accidentally nested copies such as `pages/pages/` or `journals/journals/`. notd ignores these common import mistakes, but removing the duplicate directories avoids confusion in Logseq and other tools. Run **Sync all notes and backlinks** after fixing files externally.
+Check the graph for accidentally nested copies such as `pages/pages/` or `journals/journals/`. notd ignores these common import mistakes, but removing the duplicate directories avoids confusion in other tools. Run **Sync all notes and backlinks** after fixing files externally.
 
 ### Mobile shortcut toolbar is missing
 
@@ -454,8 +445,6 @@ The LAN server:
 
 Back up the graph regularly, especially before bulk renames or concurrent editing from multiple applications.
 
-## Logseq compatibility
+## Markdown compatibility
 
-notd preserves the essential Logseq Markdown structure: pages, journals, nested blocks, properties, page references, block references, aliases, tags, and assets.
-
-Logseq-specific features such as plugins, advanced queries, whiteboards, PDF annotation, and proprietary sync are not executed. Unknown syntax is retained in Markdown whenever possible.
+notd preserves the essential file-based graph structure: pages, journals, nested blocks, properties, page references, block references, aliases, tags, and assets. Features outside this focused Markdown workflow are not interpreted, while unknown syntax is retained whenever possible.

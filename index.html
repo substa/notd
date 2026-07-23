@@ -277,6 +277,45 @@
       </div>
 
       <section
+        id="pageDirectoryView"
+        class="page-directory-view"
+        aria-label="All pages"
+        hidden
+      >
+        <header class="page-directory-header">
+          <strong>notd · All pages</strong
+          ><button
+            id="pageDirectoryClose"
+            type="button"
+            aria-label="Close all pages"
+          >
+            ×
+          </button>
+        </header>
+        <main class="page-directory-main">
+          <div class="page-directory-title">
+            <h1>All pages</h1>
+            <span id="pageDirectoryCount"></span>
+          </div>
+          <label class="page-directory-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10" cy="10" r="6" />
+              <path d="m15 15 5 5" />
+            </svg>
+            <input
+              id="pageDirectoryFilter"
+              type="search"
+              placeholder="Filter pages…"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Filter pages"
+            />
+          </label>
+          <div id="pageDirectoryContent" class="page-directory-content"></div>
+        </main>
+      </section>
+
+      <section
         id="pageHistoryView"
         class="page-history-view"
         aria-label="Page history"

@@ -6128,6 +6128,11 @@ Open, save, export, and reach recent documents or headings from the command pale
       run: () => requestAction(openTasksPage),
     },
     {
+      label: "All pages",
+      keywords: "pages directory index alphabet list browse",
+      run: () => requestAction(showPageDirectory),
+    },
+    {
       label: "Previous page",
       shortcutId: "back",
       keywords: "history back navigate",
@@ -6994,6 +6999,113 @@ Open, save, export, and reach recent documents or headings from the command pale
       closeJournalCalendar();
   });
   $("#commandButton").addEventListener("click", () => showCommandPalette());
+
+  const PAGE_DIRECTORY_SIZE = 50;
+  let pageDirectoryReturnFocus = null;
+  let pageDirectoryVisiblePages = [];
+  const pageDirectoryGroupPages = new Map();
+  const pageDirectoryExpandedGroups = new Set();
+  function allDirectoryPages() {
+    if (!graphIndex) return [];
+    const collator = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+    const seen = new Set();
+    return graphIndex
+      .pageSuggestions()
+      .filter((page) => {
+        if (seen.has(page.path)) return false;
+        seen.add(page.path);
+        return true;
+      })
+      .sort((left, right) => collator.compare(left.title, right.title));
+  }
+  function pageDirectoryLetter(title) {
+    const first = Array.from(title.trim())[0] || "";
+    const letter = first
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLocaleUpperCase();
+    return /^[A-Z]$/.test(letter) ? letter : "#";
+  }
+  function renderPageDirectory() {
+    const pages = allDirectoryPages();
+    const query = $("#pageDirectoryFilter").value.trim().toLocaleLowerCase();
+    const filtered = pages.filter((page) => {
+      const aliases = graphIndex?.aliasesForPage(page) || [];
+      return [page.title, ...aliases].some((value) =>
+        value.toLocaleLowerCase().includes(query),
+      );
+    });
+    const groups = new Map();
+    filtered.forEach((page) => {
+      const letter = pageDirectoryLetter(page.title);
+      if (!groups.has(letter)) groups.set(letter, []);
+      groups.get(letter).push(page);
+    });
+    pageDirectoryVisiblePages = [];
+    $("#pageDirectoryContent").innerHTML = groups.size
+      ? [...groups]
+          .sort(([left], [right]) => {
+            if (left === "#") return -1;
+            if (right === "#") return 1;
+            return left.localeCompare(right);
+          })
+          .map(([letter, groupPages]) => {
+            const pageCount = Math.max(
+              1,
+              Math.ceil(groupPages.length / PAGE_DIRECTORY_SIZE),
+            );
+            const groupPage = Math.min(
+              pageDirectoryGroupPages.get(letter) || 0,
+              pageCount - 1,
+            );
+            pageDirectoryGroupPages.set(letter, groupPage);
+            const start = groupPage * PAGE_DIRECTORY_SIZE;
+            const entries = groupPages
+              .slice(start, start + PAGE_DIRECTORY_SIZE)
+              .map((page) => {
+                const index = pageDirectoryVisiblePages.push(page) - 1;
+                return `<button type="button" class="page-directory-page" data-page-directory-index="${index}"><span>${escapeHtml(page.title)}</span>${page.journal ? "<small>Journal</small>" : page.virtual ? "<small>Referenced</small>" : ""}</button>`;
+              })
+              .join("");
+            const pagination =
+              pageCount > 1
+                ? `<nav class="page-directory-pagination" aria-label="${escapeHtml(letter)} pages"><button type="button" data-page-directory-group="${escapeHtml(letter)}" data-page-directory-move="-1"${groupPage === 0 ? " disabled" : ""}>Previous</button><span>${start + 1}–${Math.min(start + PAGE_DIRECTORY_SIZE, groupPages.length)} of ${groupPages.length}</span><button type="button" data-page-directory-group="${escapeHtml(letter)}" data-page-directory-move="1"${groupPage >= pageCount - 1 ? " disabled" : ""}>Next</button></nav>`
+                : "";
+            const open =
+              query || pageDirectoryExpandedGroups.has(letter) ? " open" : "";
+            return `<details class="page-directory-group" data-page-directory-letter="${escapeHtml(letter)}"${open}><summary><span>${escapeHtml(letter)}</span><small>${groupPages.length}</small></summary><div>${entries}</div>${pagination}</details>`;
+          })
+          .join("")
+      : '<p class="page-directory-empty">No matching pages</p>';
+    $("#pageDirectoryCount").textContent = query
+      ? `${filtered.length} of ${pages.length} pages`
+      : `${pages.length} ${pages.length === 1 ? "page" : "pages"}`;
+  }
+  function closePageDirectory(refocus = true) {
+    const view = $("#pageDirectoryView");
+    if (view.hidden) return;
+    view.hidden = true;
+    if (refocus) {
+      if (pageDirectoryReturnFocus?.isConnected)
+        pageDirectoryReturnFocus.focus();
+      else $("#commandButton").focus();
+    }
+  }
+  async function showPageDirectory() {
+    if (!graphStore) await openGraph();
+    if (!graphStore || !graphIndex) return;
+    pageDirectoryReturnFocus = $("#commandButton");
+    pageDirectoryGroupPages.clear();
+    pageDirectoryExpandedGroups.clear();
+    $("#pageDirectoryFilter").value = "";
+    $("#pageDirectoryView").hidden = false;
+    renderPageDirectory();
+    requestAnimationFrame(() => $("#pageDirectoryFilter").focus());
+  }
+
   let pageHistoryReturnFocus = null;
   function closePageHistory() {
     const view = $("#pageHistoryView");
@@ -7094,11 +7206,58 @@ Open, save, export, and reach recent documents or headings from the command pale
       event.preventDefault();
       closeFooterMenu();
       $("#footerMenuButton").focus();
+    } else if (event.key === "Escape" && !$("#pageDirectoryView").hidden) {
+      event.preventDefault();
+      closePageDirectory();
     } else if (event.key === "Escape" && !$("#pageHistoryView").hidden) {
       event.preventDefault();
       closePageHistory();
     }
   });
+  $("#pageDirectoryClose").addEventListener("click", () =>
+    closePageDirectory(),
+  );
+  $("#pageDirectoryFilter").addEventListener("input", () => {
+    pageDirectoryGroupPages.clear();
+    renderPageDirectory();
+  });
+  $("#pageDirectoryContent").addEventListener("click", (event) => {
+    const move = event.target.closest("[data-page-directory-move]");
+    if (move) {
+      const letter = move.dataset.pageDirectoryGroup;
+      pageDirectoryGroupPages.set(
+        letter,
+        Math.max(
+          0,
+          (pageDirectoryGroupPages.get(letter) || 0) +
+            Number(move.dataset.pageDirectoryMove),
+        ),
+      );
+      pageDirectoryExpandedGroups.add(letter);
+      renderPageDirectory();
+      return;
+    }
+    const button = event.target.closest("[data-page-directory-index]");
+    if (!button) return;
+    const page = pageDirectoryVisiblePages[
+      Number(button.dataset.pageDirectoryIndex)
+    ];
+    if (!page) return;
+    closePageDirectory(false);
+    loadGraphPage(page);
+  });
+  $("#pageDirectoryContent").addEventListener(
+    "toggle",
+    (event) => {
+      if ($("#pageDirectoryFilter").value.trim()) return;
+      const details = event.target.closest?.("[data-page-directory-letter]");
+      const letter = details?.dataset.pageDirectoryLetter;
+      if (!letter) return;
+      if (details.open) pageDirectoryExpandedGroups.add(letter);
+      else pageDirectoryExpandedGroups.delete(letter);
+    },
+    true,
+  );
   $("#pageHistoryClose").addEventListener("click", closePageHistory);
   $("#pageHistoryContent").addEventListener(
     "toggle",

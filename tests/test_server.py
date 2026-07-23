@@ -1,10 +1,12 @@
 import json
+import shutil
 import subprocess
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from server import GitSyncManager, NotdHandler
 
@@ -52,6 +54,23 @@ class GraphAssetPathTests(unittest.TestCase):
             self.handler.graph_asset_path("assets/config")
 
 
+class GitOptionalTests(unittest.TestCase):
+    def test_reports_git_as_optional_when_executable_is_missing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            graph = Path(temporary).resolve()
+            manager = GitSyncManager(graph, threading.Lock())
+            with patch("server.subprocess.run", side_effect=FileNotFoundError("git")):
+                status = manager.status()
+                synced = manager.sync(push=False)
+            manager.stop()
+
+        self.assertFalse(status["available"])
+        self.assertIn("git", status["message"])
+        self.assertEqual(synced["lastAction"], "Git sync failed")
+        self.assertIn("git", synced["lastError"])
+
+
+@unittest.skipUnless(shutil.which("git"), "Git integration tests require Git")
 class GitSyncManagerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

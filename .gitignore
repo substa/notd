@@ -1,4 +1,23 @@
-.DS_Store
+# Local configuration and secrets
 .env
+.env.*
+!.env.example
+
+# Python, tests, and coverage
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Temporary output
+*.log
+.tmp/
+tmp/

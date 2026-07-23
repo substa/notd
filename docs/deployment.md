@@ -7,7 +7,8 @@ This setup runs notd as a hardened Docker container and leaves TLS and user auth
 - A Linux server with Docker Engine and the Docker Compose plugin.
 - A working Pangolin installation and a Newt site on the same server.
 - A domain or subdomain managed by Pangolin, for example `notes.example.com`.
-- A Logseq-compatible graph already present on the server.
+- A file-based Markdown graph already present on the server.
+- A copy of the notd source tree. Git is optional and is not installed on the host by notd.
 
 Confirm Docker is available:
 
@@ -18,14 +19,21 @@ docker compose version
 
 ## 2. Install notd
 
-Clone or copy the repository to the server:
+Create the application directory:
 
 ```bash
 sudo mkdir -p /opt/notd
 sudo chown "$USER":"$USER" /opt/notd
+```
+
+Then either download a release/source archive from GitHub, extract it into `/opt/notd`, and run `cd /opt/notd`, or clone the repository:
+
+```bash
 git clone YOUR_REPOSITORY_URL /opt/notd
 cd /opt/notd
 ```
+
+The clone method requires you to [install Git](https://git-scm.com/downloads) separately. Git is not required when using an archive and is not required for editing, saving, offline synchronization, or backups.
 
 Create the deployment configuration:
 
@@ -42,6 +50,7 @@ NOTD_UID=1000
 NOTD_GID=1000
 NOTD_PORT=4176
 PANGOLIN_NETWORK=pangolin
+NOTD_DOCKER_TARGET=runtime
 ```
 
 Find the appropriate numeric IDs with:
@@ -113,6 +122,8 @@ curl --fail http://127.0.0.1:4176/api/graph/status
 
 The status response should contain `"enabled":true`. The loopback binding is intended only for diagnostics from the server itself and is not reachable remotely.
 
+The default `runtime` image deliberately does not contain Git. To enable optional page history and Git snapshots, set `NOTD_DOCKER_TARGET=runtime-git` and rebuild. The Git-enabled image only supplies the executable; the mounted graph must already be a repository, and credentials/configuration remain your responsibility. All non-Git features work identically with the default image.
+
 The container uses:
 
 - a read-only application filesystem;
@@ -160,11 +171,19 @@ Remember that an authenticated PWA can retain an offline graph replica in browse
 
 ## 7. Update notd
 
-From the deployment directory:
+If the source was cloned with a separately installed Git client:
 
 ```bash
 cd /opt/notd
 git pull --ff-only
+docker compose up -d --build --remove-orphans
+docker image prune -f
+```
+
+For an archive installation, download the new archive, verify that `.env` and the graph are backed up, replace only the application source files in `/opt/notd`, and run:
+
+```bash
+cd /opt/notd
 docker compose up -d --build --remove-orphans
 docker image prune -f
 ```
