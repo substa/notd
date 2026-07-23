@@ -2745,11 +2745,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     const offset = (first.getDay() + 6) % 7;
     const start = new Date(year, month, 1 - offset, 12);
     const today = NotdGraph.journalInfo(new Date(), graphStore?.config).date;
-    const current = state.graphPage?.journalDate;
     const focused = NotdGraph.journalInfo(
       calendarFocusDate,
       graphStore?.config,
     ).date;
+    const current = calendarSelectAction
+      ? focused
+      : state.graphPage?.journalDate;
     $("#calendarDays").innerHTML = Array.from({ length: 42 }, (_, index) => {
       const date = new Date(start);
       date.setDate(start.getDate() + index);
@@ -2901,7 +2903,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     const belongedToToday =
       (scheduled && scheduled <= today) ||
       (!scheduled && page.journalDate === today);
-    if (next === "DONE" && belongedToToday) {
+    if (next === "DONE" && (belongedToToday || inProgress)) {
       if (!state.taskCompletedTodayIds.includes(id))
         state.taskCompletedTodayIds.push(id);
     } else if (next !== "DONE") {
@@ -3375,7 +3377,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     return true;
   }
 
-  function indentGraphBlock(block, outdent = false) {
+  function indentGraphBlock(block, outdent = false, focus = true) {
     const location = graphBlockLocation(block.id);
     if (!location) return false;
     if (!outdent) {
@@ -3391,7 +3393,11 @@ Open, save, export, and reach recent documents or headings from the command pale
       location.blocks.splice(location.index, 1);
       parentLocation.blocks.splice(parentLocation.index + 1, 0, block);
     }
-    graphMutationFocus(block);
+    if (focus) graphMutationFocus(block);
+    else {
+      graphChanged();
+      renderGraphPage();
+    }
     return true;
   }
 
@@ -3606,7 +3612,7 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
     if (shortcutMatches("taskCycle", event)) {
       event.preventDefault();
-      toggleGraphTask(block);
+      toggleGraphTask(block, true, true);
       return;
     }
     if (shortcutMatches("blockLine", event) && !automaticMobileShift) {
@@ -7513,6 +7519,70 @@ Open, save, export, and reach recent documents or headings from the command pale
       changed();
     }
   });
+  let blockSwipe = null;
+  let suppressBlockClickUntil = 0;
+  const finishBlockSwipe = (event, canceled = false) => {
+    const swipe = blockSwipe;
+    if (!swipe || event.pointerId !== swipe.pointerId) return;
+    blockSwipe = null;
+    if (outliner.hasPointerCapture(event.pointerId))
+      outliner.releasePointerCapture(event.pointerId);
+    if (canceled) return;
+    const deltaX = event.clientX - swipe.x;
+    const deltaY = event.clientY - swipe.y;
+    if (
+      Math.abs(deltaX) < 56 ||
+      Math.abs(deltaX) < Math.abs(deltaY) * 1.35 ||
+      Date.now() - swipe.time > 1000
+    )
+      return;
+    event.preventDefault();
+    suppressBlockClickUntil = Date.now() + 500;
+    const block = graphBlockLocation(swipe.blockId)?.block;
+    if (!block) return;
+    const outdent = deltaX < 0;
+    const snapshot = captureVimSnapshot();
+    if (!indentGraphBlock(block, outdent, false)) {
+      toast(
+        outdent
+          ? "Block is already at the root"
+          : "No previous block to indent under",
+      );
+      return;
+    }
+    pushVimSnapshot(vimUndoStack, snapshot);
+    vimRedoStack.length = 0;
+    navigator.vibrate?.(12);
+    toast(outdent ? "Block outdented" : "Block indented");
+  };
+  outliner.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch" || event.button !== 0) return;
+    if (event.target.closest("button,a,input,textarea,select,audio,video,iframe"))
+      return;
+    const row = event.target.closest(".block-row");
+    const node = row?.closest(".block-node");
+    if (!node || node.dataset.pagePath !== state.graphPage?.path) return;
+    blockSwipe = {
+      pointerId: event.pointerId,
+      blockId: node.dataset.blockId,
+      x: event.clientX,
+      y: event.clientY,
+      time: Date.now(),
+    };
+    outliner.setPointerCapture(event.pointerId);
+  });
+  outliner.addEventListener("pointermove", (event) => {
+    if (!blockSwipe || event.pointerId !== blockSwipe.pointerId) return;
+    const deltaX = event.clientX - blockSwipe.x;
+    const deltaY = event.clientY - blockSwipe.y;
+    if (Math.abs(deltaX) > 12 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2)
+      event.preventDefault();
+  });
+  outliner.addEventListener("pointerup", (event) => finishBlockSwipe(event));
+  outliner.addEventListener("pointercancel", (event) =>
+    finishBlockSwipe(event, true),
+  );
+
   let taskLongPressTimer = null;
   let taskLongPressStart = null;
   let suppressTaskClickUntil = 0;
@@ -7611,6 +7681,13 @@ Open, save, export, and reach recent documents or headings from the command pale
     }
   });
   outliner.addEventListener("click", async (event) => {
+    if (
+      Date.now() < suppressBlockClickUntil &&
+      event.target.closest(".block-node")
+    ) {
+      event.preventDefault();
+      return;
+    }
     const taskControl = event.target.closest(
       "[data-task-checkbox-page], [data-task-block]",
     );

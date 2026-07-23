@@ -167,8 +167,8 @@ Each bullet is a block. Nested blocks are stored through Markdown indentation.
 | --- | --- |
 | Create the next block | `Enter` |
 | Insert a line in the same block | `Shift + Enter` |
-| Indent | `Tab` |
-| Outdent | `Shift + Tab` |
+| Indent | `Tab` or swipe right on a block |
+| Outdent | `Shift + Tab` or swipe left on a block |
 | Move up or down | `Alt + ↑/↓` |
 | Delete an empty block | `Backspace` |
 | Select multiple blocks | `⌘/Ctrl + click`; use `Shift + click` for a range |
@@ -193,7 +193,7 @@ Task status controls behave consistently in journal blocks, regular pages, the j
 
 A normal click is therefore the quick completion action. Use `Shift + click` when a task should be marked as in progress instead, or hold the status control for about half a second on a touch device. Moving the pointer or finger cancels the hold gesture. Devices that support vibration provide brief feedback when the long press is recognized.
 
-`Shift + click` on a task status is reserved for changing its state and does not extend the block selection. `⌘/Ctrl + Enter` preserves the complete keyboard workflow:
+`Shift + click` on a task status is reserved for changing its state and does not extend the block selection. On an empty block, `⌘/Ctrl + Enter` inserts `TODO ` and leaves the caret after the space, ready for the task text. It otherwise preserves the complete keyboard workflow:
 
 ```text
 TODO → DOING → DONE → TODO
@@ -201,7 +201,7 @@ TODO → DOING → DONE → TODO
 
 Changes made from a task summary or dashboard are written back to the task's original Markdown page. Before a task moves to another section or disappears from the current filtered list, its row briefly displays **Completed**, **In progress**, or **To do** to confirm the new state.
 
-Dashboard tasks with a scheduled date are ordered from the nearest date to the farthest. Tasks in progress appear at the bottom of **Today** in the journal summary, mini calendar, and complete dashboard. Completed tasks are ordered by completion time, newest first. When notd marks a task as `DONE`, it records a hidden `completed-at::` property in the block; existing completed tasks without this property fall back to their journal date or page modification time.
+Dashboard tasks with a scheduled date are ordered from the nearest date to the farthest. Clicking a scheduled date opens the mini calendar on that month with the currently assigned day selected. Tasks in progress appear at the bottom of **Today** in the journal summary, mini calendar, and complete dashboard. When completed, they remain visible as done in the daily view for the rest of the day, including tasks created on earlier dates. Completed tasks are ordered by completion time, newest first. When notd marks a task as `DONE`, it records a hidden `completed-at::` property in the block; existing completed tasks without this property fall back to their journal date or page modification time.
 
 Task-state changes participate in the regular undo/redo history, including changes made from summaries and dashboards. Use `⌘/Ctrl + Z` to restore the previous state and `⌘/Ctrl + Shift + Z` (or `⌘/Ctrl + Y`) to reapply it. Undo and redo update the task in its original Markdown page and show a confirmation message with the restored state.
 

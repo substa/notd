@@ -1429,6 +1429,7 @@ svg {
   align-items: start;
   min-height: 32px;
   border-radius: 4px;
+  touch-action: pan-y;
 }
 .block-node.block-selected > .block-row {
   background: color-mix(in srgb, var(--accent) 13%, transparent);
