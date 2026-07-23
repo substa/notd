@@ -8,7 +8,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from server import GitSyncManager, NotdHandler
+from server import (
+    GitSyncManager,
+    NotdHandler,
+    content_mentions_asset,
+    referenced_asset_paths,
+)
 
 
 class GraphAssetPathTests(unittest.TestCase):
@@ -52,6 +57,20 @@ class GraphAssetPathTests(unittest.TestCase):
             self.skipTest("Symbolic links are not available")
         with self.assertRaises(ValueError):
             self.handler.graph_asset_path("assets/config")
+
+
+class AssetReferenceTests(unittest.TestCase):
+    def test_detects_raw_encoded_and_non_standard_asset_mentions(self):
+        path = "assets/My image.png"
+        self.assertTrue(content_mentions_asset("- ![](../assets/My image.png)", path))
+        self.assertTrue(content_mentions_asset("- ![](../assets/My%20image.png)", path))
+        content = '<img src="/assets/My%20image.png">'
+        self.assertTrue(content_mentions_asset(content, path))
+        self.assertEqual(
+            referenced_asset_paths(content, [path, "assets/orphan.pdf"]),
+            {path},
+        )
+        self.assertFalse(content_mentions_asset("- no attachment here", path))
 
 
 class GitOptionalTests(unittest.TestCase):

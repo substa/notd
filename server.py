@@ -18,15 +18,76 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 MAX_BODY = 8 * 1024 * 1024
 MAX_ASSET_BODY = 64 * 1024 * 1024
 MAX_GRAPH_FILES = 20_000
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
+
+
+def content_mentions_asset(content: str, path: str, decoded_content: str | None = None) -> bool:
+    """Conservatively detect raw, encoded, relative, or non-standard asset mentions."""
+    name = PurePosixPath(path).name
+    encoded_path = "/".join(quote(part, safe="") for part in path.split("/"))
+    variants = {path, encoded_path, path.replace("/", "\\"), name, quote(name, safe="")}
+    decoded = unquote(content) if decoded_content is None else decoded_content
+    return any(value in content for value in variants) or path in decoded or name in decoded
+
+
+def referenced_asset_paths(content: str, paths: list[str]) -> set[str]:
+    """Find all candidate asset names in linear time with an Aho-Corasick trie."""
+    if not paths:
+        return set()
+    transitions: list[dict[str, int]] = [{}]
+    failures = [0]
+    outputs: list[list[int]] = [[]]
+    for index, path in enumerate(paths):
+        name = PurePosixPath(path).name
+        patterns = {
+            path,
+            "/".join(quote(part, safe="") for part in path.split("/")),
+            path.replace("/", "\\"),
+            name,
+            quote(name, safe=""),
+        }
+        for pattern in patterns:
+            state = 0
+            for character in pattern:
+                if character not in transitions[state]:
+                    transitions[state][character] = len(transitions)
+                    transitions.append({})
+                    failures.append(0)
+                    outputs.append([])
+                state = transitions[state][character]
+            outputs[state].append(index)
+    pending = deque(transitions[0].values())
+    while pending:
+        state = pending.popleft()
+        for character, next_state in transitions[state].items():
+            pending.append(next_state)
+            fallback = failures[state]
+            while fallback and character not in transitions[fallback]:
+                fallback = failures[fallback]
+            failures[next_state] = transitions[fallback].get(character, 0)
+            outputs[next_state].extend(outputs[failures[next_state]])
+    referenced: set[str] = set()
+    decoded = unquote(content)
+    sources = (content,) if decoded == content else (content, decoded)
+    for source in sources:
+        state = 0
+        for character in source:
+            while state and character not in transitions[state]:
+                state = failures[state]
+            state = transitions[state].get(character, 0)
+            referenced.update(paths[index] for index in outputs[state])
+    return referenced
+
+
 # Serve an explicit application allowlist instead of exposing the repository root.
 STATIC_FILES = {
     "/",
@@ -946,6 +1007,47 @@ class NotdHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self.require_api_access(parsed, write=True):
             return
+        if parsed.path == "/api/graph/assets/cleanup":
+            if not self.graph:
+                return self.error_json(HTTPStatus.NOT_FOUND, "No graph configured")
+            try:
+                payload = self.request_json()
+                raw_paths = payload.get("paths")
+                if not isinstance(raw_paths, list) or len(raw_paths) > MAX_GRAPH_FILES:
+                    raise ValueError("Invalid asset cleanup list")
+                paths = list(dict.fromkeys(str(path) for path in raw_paths))
+                targets = [(path, self.graph_asset_path(path)) for path in paths]
+                deleted: list[str] = []
+                referenced: list[str] = []
+                missing: list[str] = []
+                failed: list[str] = []
+                with self.server.mutation_lock:  # type: ignore[attr-defined]
+                    corpus = "\n".join(file["content"] for file in self.scan_graph())
+                    linked_paths = referenced_asset_paths(corpus, paths)
+                    for path, target in targets:
+                        if path in linked_paths:
+                            referenced.append(path)
+                            continue
+                        if not target.is_file():
+                            missing.append(path)
+                            continue
+                        try:
+                            target.unlink()
+                            deleted.append(path)
+                        except OSError:
+                            failed.append(path)
+                for path in deleted:
+                    self.broker.publish({"type": "asset-deleted", "path": path, "clientId": payload.get("clientId")})
+                if deleted and self.git_sync:
+                    self.git_sync.schedule()
+                return self.json_response({
+                    "deleted": len(deleted),
+                    "skipped": len(referenced),
+                    "missing": len(missing),
+                    "failed": len(failed),
+                })
+            except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
+                return self.error_json(HTTPStatus.BAD_REQUEST, str(error))
         if parsed.path == "/api/graph/git/sync":
             if not self.graph or not self.git_sync:
                 return self.error_json(HTTPStatus.NOT_FOUND, "Git sync is unavailable")

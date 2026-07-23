@@ -58,7 +58,7 @@ Open the command palette with:
 - `F1`;
 - `:` in Vim Normal mode.
 
-Use the palette to find pages and blocks, change themes, open files, navigate journals, format content, manage graph maintenance, and open this documentation.
+Use the palette for application actions: find pages and blocks, change themes, open files, navigate journals, manage graph maintenance, and open this documentation. Formatting tools stay in the editor toolbar, keyboard shortcuts, and inline autocomplete instead of appearing in the command list.
 
 Run **All pages** to open the page directory. Every alphabetical section is shown collapsed with its total page count and has independent pagination when it contains more than 50 pages; the filter updates results immediately and automatically expands matching sections. Select a title to open that page.
 
@@ -88,7 +88,8 @@ When a graph is open, the command palette also provides:
 | --- | --- |
 | **Open local graph** | Select a graph folder with browser filesystem access. |
 | **Sync all notes and backlinks** | Rescan every Markdown note and rebuild page, block, backlink, and autocomplete indexes. Use this after external changes that were not detected automatically. |
-| **Clean orphaned assets** | Scans `assets/` and lists files whose path does not occur in any Markdown note before asking for confirmation to delete them. The check is deliberately conservative, but review the displayed list and keep backups before confirming. |
+| **Clean orphaned assets** | Scans `assets/` and opens a scrollable review containing every deletion candidate. Raw, encoded, relative, and non-standard filename occurrences in any Markdown note preserve the asset. After confirmation, references are checked again and remote deletions run as one server-side batch, so large cleanups do not leave later candidates behind. The check deliberately prefers false positives over deleting a referenced file; review the complete list and keep backups before confirming. |
+| **Clean empty pages** | Deletes blank non-journal files containing at most an empty bullet, but only when no page reference or tag links to them. A confirmation lists every candidate first. |
 | **New graph page** | Create a Markdown page in `pages/`. |
 | **Close graph** | Return to the single-document editor. |
 
@@ -217,7 +218,7 @@ Task-state changes participate in the regular undo/redo history, including chang
 #tag
 ```
 
-Click a reference to open its page. A missing page opens as a virtual page so its backlinks can be viewed; a Markdown file is created only after you edit it.
+Click a reference to open its page. A missing page opens as a virtual page so its backlinks can be viewed; a Markdown file is created only after you edit it. Page references, block references, and `#tags` inside fenced code blocks are treated as code and excluded from the graph index.
 
 ### Block references
 
@@ -390,7 +391,7 @@ Direct local-file saving requires the File System Access API. Other browsers use
 
 Headings, ordered lists, bullet lists, tables, dividers, frontmatter, and fenced code blocks are also supported.
 
-To wrap selected text directly from the keyboard, type the opening character twice: `~~` creates strikethrough, `[[` creates a page reference, `((` creates a block reference, and `**` or `__` creates bold text. The commands are also available in the command palette.
+To wrap selected text directly from the keyboard, type the opening character twice: `~~` creates strikethrough, `[[` creates a page reference, `((` creates a block reference, and `**` or `__` creates bold text.
 
 ## Themes
 

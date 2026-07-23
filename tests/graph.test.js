@@ -31,6 +31,14 @@ test('preserves Logseq task markers and scheduling metadata', () => {
   assert.equal(Graph.serializeDocument(document), markdown);
 });
 
+test('recognizes only blank generated page content as empty', () => {
+  assert.equal(Graph.isEmptyPageContent(''), true);
+  assert.equal(Graph.isEmptyPageContent('- \n'), true);
+  assert.equal(Graph.isEmptyPageContent('*'), true);
+  assert.equal(Graph.isEmptyPageContent('- actual text'), false);
+  assert.equal(Graph.isEmptyPageContent('title:: Preserved\n\n- '), false);
+});
+
 test('keeps fenced code inside a single graph block', () => {
   const markdown = '- ```bash\n  echo "hello"\n  - this is code, not a child block\n  ```\n- next block\n';
   const document = Graph.parseDocument(markdown);
@@ -67,6 +75,22 @@ test('does not index shell conditionals in fenced code as page references', () =
   ]);
 
   assert.equal(index.pageSuggestions().some(page => page.title.includes('${VALUE}')), false);
+  assert.equal(index.referencesToPage('Real page').length, 1);
+});
+
+test('does not index tags or references inside fenced code', () => {
+  const index = new Graph.GraphIndex([
+    {
+      title: 'Examples',
+      path: 'pages/examples.md',
+      content: '- ```css\n  color: #000000;\n  ```\n- ```cron\n  #0 * * * * command\n  ```\n- #real-tag [[Real page]]\n',
+    },
+  ]);
+  const suggestions = index.pageSuggestions().map(page => page.title);
+
+  assert.equal(suggestions.includes('000000'), false);
+  assert.equal(suggestions.includes('0'), false);
+  assert.equal(suggestions.includes('real-tag'), true);
   assert.equal(index.referencesToPage('Real page').length, 1);
 });
 
@@ -146,6 +170,20 @@ test('resolves graph assets relative to the page folder', () => {
   assert.equal(Graph.resolveAssetPath('../assets/immagine.jpg', 'pages'), 'assets/immagine.jpg');
   assert.equal(Graph.resolveAssetPath('../assets/My%20image.jpg', 'journals'), 'assets/My image.jpg');
   assert.equal(Graph.resolveAssetPath('./images/image.jpg', 'pages/nested'), 'pages/nested/images/image.jpg');
+});
+
+test('preserves assets mentioned through raw, encoded, or non-standard links', () => {
+  const path = 'assets/My image.png';
+
+  assert.equal(Graph.contentMentionsAsset('- ![](../assets/My image.png)', path), true);
+  assert.equal(Graph.contentMentionsAsset('- ![](../assets/My%20image.png)', path), true);
+  const corpus = Graph.assetReferenceCorpus('<img src="/assets/My%20image.png">');
+  assert.equal(Graph.contentMentionsAsset(corpus, path), true);
+  assert.deepEqual(
+    [...Graph.referencedAssetPaths(corpus, [path, 'assets/orphan.pdf'])],
+    [path],
+  );
+  assert.equal(Graph.contentMentionsAsset('- no attachment here', path), false);
 });
 
 test('queues and synchronizes remote page writes while offline', async () => {

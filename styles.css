@@ -984,6 +984,23 @@ svg {
   background: #b84f4f;
   color: #fff;
 }
+.cleanup-dialog {
+  width: min(560px, calc(100% - 32px));
+}
+.cleanup-file-list {
+  display: block;
+  width: 100%;
+  height: min(52vh, 420px);
+  margin: 14px 0 0;
+  padding: 10px;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--chrome);
+  color: var(--text);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+}
 .theme-dark {
   --bg: #292b2e;
   --chrome: #25272a;

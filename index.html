@@ -373,6 +373,32 @@
         </div>
       </div>
 
+      <div class="dialog-backdrop" id="assetCleanupDialog" hidden>
+        <div
+          class="dialog cleanup-dialog"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="assetCleanupTitle"
+          aria-describedby="assetCleanupMessage"
+        >
+          <h2 id="assetCleanupTitle">Delete orphaned assets?</h2>
+          <p id="assetCleanupMessage"></p>
+          <textarea
+            id="assetCleanupList"
+            class="cleanup-file-list"
+            aria-label="Orphaned asset files"
+            readonly
+            spellcheck="false"
+          ></textarea>
+          <div>
+            <button type="button" data-asset-cleanup="cancel">Cancel</button
+            ><button type="button" class="danger" data-asset-cleanup="confirm">
+              Delete all listed files
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="command-backdrop" id="commandPalette" hidden>
         <div
           class="command-palette"

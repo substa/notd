@@ -44,6 +44,107 @@
     }
     return normalized.join("/");
   }
+  function assetReferenceCorpus(content) {
+    const source = String(content || "");
+    try {
+      return { source, decoded: decodeURIComponent(source) };
+    } catch {
+      return { source, decoded: source };
+    }
+  }
+
+  // Preserve assets when even a non-standard raw or encoded occurrence exists in Markdown.
+  function contentMentionsAsset(content, path) {
+    const corpus =
+      content && typeof content === "object"
+        ? content
+        : assetReferenceCorpus(content);
+    const source = corpus.source;
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const name = path.split("/").at(-1) || path;
+    const variants = new Set([
+      path,
+      encodedPath,
+      path.replaceAll("/", "\\"),
+      name,
+      encodeURIComponent(name),
+    ]);
+    return (
+      [...variants].some((value) => source.includes(value)) ||
+      corpus.decoded.includes(path) ||
+      corpus.decoded.includes(name)
+    );
+  }
+
+  // Scan every candidate filename in linear time instead of rescanning all notes per asset.
+  function referencedAssetPaths(content, paths) {
+    if (!paths.length) return new Set();
+    const corpus =
+      content && typeof content === "object"
+        ? content
+        : assetReferenceCorpus(content);
+    const nodes = [{ next: new Map(), fail: 0, outputs: [] }];
+    paths.forEach((path, index) => {
+      const name = path.split("/").at(-1) || path;
+      const patterns = new Set([
+        path,
+        path.split("/").map(encodeURIComponent).join("/"),
+        path.replaceAll("/", "\\"),
+        name,
+        encodeURIComponent(name),
+      ]);
+      for (const pattern of patterns) {
+        let state = 0;
+        for (const character of pattern) {
+          if (!nodes[state].next.has(character)) {
+            nodes[state].next.set(character, nodes.length);
+            nodes.push({ next: new Map(), fail: 0, outputs: [] });
+          }
+          state = nodes[state].next.get(character);
+        }
+        nodes[state].outputs.push(index);
+      }
+    });
+    const queue = [...nodes[0].next.values()];
+    for (let position = 0; position < queue.length; position++) {
+      const state = queue[position];
+      for (const [character, next] of nodes[state].next) {
+        queue.push(next);
+        let fallback = nodes[state].fail;
+        while (fallback && !nodes[fallback].next.has(character))
+          fallback = nodes[fallback].fail;
+        nodes[next].fail = nodes[fallback].next.get(character) ?? 0;
+        nodes[next].outputs.push(...nodes[nodes[next].fail].outputs);
+      }
+    }
+    const referenced = new Set();
+    const scan = (source) => {
+      let state = 0;
+      for (const character of source) {
+        while (state && !nodes[state].next.has(character))
+          state = nodes[state].fail;
+        state = nodes[state].next.get(character) ?? 0;
+        nodes[state].outputs.forEach((index) => referenced.add(paths[index]));
+      }
+    };
+    scan(corpus.source);
+    if (corpus.decoded !== corpus.source) scan(corpus.decoded);
+    return referenced;
+  }
+
+  // Bound parallel filesystem or network mutations to keep large cleanups responsive.
+  async function settleInBatches(items, worker, concurrency = 8) {
+    const results = [];
+    for (let index = 0; index < items.length; index += concurrency) {
+      results.push(
+        ...(await Promise.allSettled(
+          items.slice(index, index + concurrency).map(worker),
+        )),
+      );
+    }
+    return results;
+  }
+
   const newId = () =>
     crypto.randomUUID?.() ||
     `notd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -117,6 +218,12 @@
         return /\.pdf$/i.test(path) ? `[${label}](${url}${title})` : whole;
       },
     );
+  }
+
+  // Generated placeholder pages contain either no text or one empty list marker.
+  function isEmptyPageContent(content) {
+    const value = String(content || "").trim();
+    return !value || /^[-*+]\s*$/.test(value);
   }
 
   function propertiesFrom(text) {
@@ -252,28 +359,47 @@
     return result;
   }
 
-  // Reference scanners ignore fenced code to avoid indexing examples as real links.
+  // Strip fenced source before indexing so code examples never become graph entities.
+  function indexableText(text) {
+    const output = [];
+    let fence = null;
+    for (const line of String(text || "").split("\n")) {
+      if (fence) {
+        const closing = line.match(/^\s*(`+|~+)\s*$/)?.[1];
+        if (
+          closing &&
+          closing[0] === fence.character &&
+          closing.length >= fence.length
+        )
+          fence = null;
+        continue;
+      }
+      const opening = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+      if (opening) {
+        fence = { character: opening[0], length: opening.length };
+        continue;
+      }
+      output.push(line);
+    }
+    return output.join("\n");
+  }
+
   function pageReferences(text) {
-    // Shell conditionals and other fenced code can contain `[[ … ]]`; they are not wiki links.
-    const prose = String(text || "").replace(
-      /(^|\n)\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g,
-      "$1",
-    );
-    return [...prose.matchAll(/\[\[([^\]]+?)\]\]/g)].map((match) =>
-      match[1].split("|")[0].trim(),
+    return [...indexableText(text).matchAll(/\[\[([^\]]+?)\]\]/g)].map(
+      (match) => match[1].split("|")[0].trim(),
     );
   }
 
   function blockReferences(text) {
-    return [...text.matchAll(/\(\(([0-9a-z-]{8,})\)\)/gi)].map(
-      (match) => match[1],
-    );
+    return [
+      ...indexableText(text).matchAll(/\(\(([0-9a-z-]{8,})\)\)/gi),
+    ].map((match) => match[1]);
   }
 
   function tags(text) {
-    return [...text.matchAll(/(^|\s)#([\p{L}\p{N}_/-]+)/gu)].map(
-      (match) => match[2],
-    );
+    return [
+      ...indexableText(text).matchAll(/(^|\s)#([\p{L}\p{N}_/-]+)/gu),
+    ].map((match) => match[2]);
   }
 
   function pageTitle(content, filename) {
@@ -733,15 +859,20 @@
     async deletePage(page) {
       if (!(await this.ensurePermission()))
         throw new Error("Graph is read only");
-      const file = await page.handle.getFile();
-      if (
-        page.lastModified &&
-        file.lastModified !== page.lastModified &&
-        (await file.text()) !== page.content
-      )
-        throw new ConflictError();
-      const directory = await this.directory(page.folder || "");
-      await directory.removeEntry(page.name);
+      try {
+        const file = await page.handle.getFile();
+        if (
+          page.lastModified &&
+          file.lastModified !== page.lastModified &&
+          (await file.text()) !== page.content
+        )
+          throw new ConflictError();
+        const directory = await this.directory(page.folder || "");
+        await directory.removeEntry(page.name);
+      } catch (error) {
+        // Missing files are already in the desired state; still clear stale index entries.
+        if (error.name !== "NotFoundError") throw error;
+      }
       this.pages = this.pages.filter((item) => item !== page);
       await removeDraft(page.path).catch(() => {});
     }
@@ -804,6 +935,25 @@
       const url = this.assetUrls.get(path);
       if (url) URL.revokeObjectURL(url);
       this.assetUrls.delete(path);
+    }
+
+    async removeAssets(references) {
+      const results = await settleInBatches(references, (reference) =>
+        this.removeAsset(reference),
+      );
+      const missing = results.filter(
+        (result) =>
+          result.status === "rejected" && result.reason?.name === "NotFoundError",
+      ).length;
+      return {
+        deleted: results.filter((result) => result.status === "fulfilled").length,
+        skipped: missing,
+        failed: results.filter(
+          (result) =>
+            result.status === "rejected" &&
+            result.reason?.name !== "NotFoundError",
+        ).length,
+      };
     }
 
     disposeAssets() {
@@ -1281,15 +1431,20 @@
 
     async deletePage(page) {
       if (this.offline) throw new Error("Deleting pages requires a connection");
-      await this.api("/file", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          path: page.path,
-          expectedRevision: page.lastModified,
-          clientId: this.clientId,
-        }),
-      });
+      try {
+        await this.api("/file", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path: page.path,
+            expectedRevision: page.lastModified,
+            clientId: this.clientId,
+          }),
+        });
+      } catch (error) {
+        // Treat a server-side missing file as an idempotent delete.
+        if (!/graph file not found/i.test(error.message || "")) throw error;
+      }
       this.pages = this.pages.filter((item) => item !== page);
       this.cacheFile(page.path, "", null, true);
       await this.persistCache();
@@ -1349,6 +1504,28 @@
           message = (await response.json()).error || message;
         } catch {}
         throw new Error(message);
+      }
+    }
+
+    async removeAssets(references) {
+      const paths = references.map((reference) => resolveAssetPath(reference));
+      try {
+        return await this.api("/assets/cleanup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths, clientId: this.clientId }),
+        });
+      } catch (error) {
+        // Older graph servers can still clean safely without an unbounded request burst.
+        if (!/unknown graph endpoint/i.test(error.message || "")) throw error;
+        const results = await settleInBatches(references, (reference) =>
+          this.removeAsset(reference),
+        );
+        return {
+          deleted: results.filter((result) => result.status === "fulfilled").length,
+          skipped: 0,
+          failed: results.filter((result) => result.status === "rejected").length,
+        };
       }
     }
 
@@ -1625,11 +1802,15 @@
     serializeDocument,
     flattenBlocks,
     propertiesFrom,
+    isEmptyPageContent,
     pageReferences,
     blockReferences,
     pageTitle,
     normalizePage,
     resolveAssetPath,
+    assetReferenceCorpus,
+    contentMentionsAsset,
+    referencedAssetPaths,
     replacePageReferences,
     normalizePdfEmbeds,
     saveDraft,

@@ -2201,18 +2201,6 @@ Open, save, export, and reach recent documents or headings from the command pale
     renderReferences();
   }
 
-  function assetPathsInContent(content) {
-    return [
-      ...new Set(
-        [
-          ...String(content || "").matchAll(
-            /!?\[[^\]]*\]\((\/assets\/[^\s)]+)/g,
-          ),
-        ].map((match) => match[1]),
-      ),
-    ];
-  }
-
   function graphStatusLabel(fallback = "Ready") {
     const offline = Boolean(graphStore?.isRemote && graphStore.offline);
     app.classList.toggle("offline-mode", offline);
@@ -2559,68 +2547,152 @@ Open, save, export, and reach recent documents or headings from the command pale
     });
   }
 
+  let assetCleanupResolve = null;
+  function reviewOrphanedAssets(paths) {
+    const dialog = $("#assetCleanupDialog");
+    $("#assetCleanupMessage").textContent = `Review all ${paths.length} unreferenced file${paths.length === 1 ? "" : "s"} before deleting them. This cannot be undone.`;
+    $("#assetCleanupList").value = paths.join("\n");
+    dialog.hidden = false;
+    requestAnimationFrame(() =>
+      dialog.querySelector('[data-asset-cleanup="cancel"]')?.focus(),
+    );
+    return new Promise((resolve) => {
+      assetCleanupResolve = resolve;
+    });
+  }
+
+  function closeAssetCleanupDialog(confirmed = false) {
+    const dialog = $("#assetCleanupDialog");
+    if (dialog.hidden) return;
+    dialog.hidden = true;
+    $("#assetCleanupList").value = "";
+    const resolve = assetCleanupResolve;
+    assetCleanupResolve = null;
+    resolve?.(confirmed);
+  }
+
   async function cleanOrphanedAssets() {
     if (!graphStore) return toast("Open a graph first");
     try {
       saveState.textContent = "Checking assets…";
       const pages = await graphStore.scan();
       graphIndex = new NotdGraph.GraphIndex(pages);
-      // Be deliberately conservative: preserve an asset whenever its path appears anywhere
-      // in a Markdown file, even if the link syntax is non-standard or incomplete.
-      const sources = pages.map((page) => String(page.content || ""));
-      const referenced = new Set(
-        pages.flatMap((page) =>
-          assetPathsInContent(page.content).map((path) =>
-            NotdGraph.resolveAssetPath(path),
-          ),
-        ),
+      // Search one corpus instead of comparing every asset with every page separately.
+      const corpus = NotdGraph.assetReferenceCorpus(
+        pages.map((page) => String(page.content || "")).join("\n"),
       );
-      const isReferenced = (path) => {
-        const encoded = path.split("/").map(encodeURIComponent).join("/");
-        return (
-          referenced.has(path) ||
-          sources.some(
-            (source) =>
-              source.includes(`/${path}`) || source.includes(`/${encoded}`),
-          )
-        );
-      };
-      const orphans = (await graphStore.listAssets()).filter(
-        (path) => !isReferenced(path),
-      );
+      const assets = await graphStore.listAssets();
+      const referenced = NotdGraph.referencedAssetPaths(corpus, assets);
+      const orphans = assets.filter((path) => !referenced.has(path));
       if (!orphans.length) {
         saveState.textContent = "Ready";
         return toast("No orphaned assets found");
       }
-      const preview = orphans
+      if (!(await reviewOrphanedAssets(orphans))) {
+        saveState.textContent = "Ready";
+        return;
+      }
+      // Re-scan after review so a newly added link always wins over deletion.
+      saveState.textContent = "Verifying assets…";
+      const latestPages = await graphStore.scan();
+      graphIndex = new NotdGraph.GraphIndex(latestPages);
+      const latestCorpus = NotdGraph.assetReferenceCorpus(
+        latestPages.map((page) => String(page.content || "")).join("\n"),
+      );
+      const existingAssets = await graphStore.listAssets();
+      const latestReferenced = NotdGraph.referencedAssetPaths(
+        latestCorpus,
+        existingAssets,
+      );
+      const reviewed = new Set(orphans);
+      const verified = existingAssets.filter(
+        (path) => reviewed.has(path) && !latestReferenced.has(path),
+      );
+      if (!verified.length) {
+        saveState.textContent = "Ready";
+        return toast("No reviewed assets are still orphaned");
+      }
+      saveState.textContent = `Deleting ${verified.length} assets…`;
+      const result = await graphStore.removeAssets(
+        verified.map((path) => `/${path}`),
+      );
+      const failed = result.failed || 0;
+      const skipped = result.skipped || 0;
+      saveState.textContent = failed ? "Cleanup incomplete" : "Ready";
+      const details = [
+        `${result.deleted || 0} deleted`,
+        skipped ? `${skipped} newly referenced` : "",
+        failed ? `${failed} failed` : "",
+      ].filter(Boolean);
+      toast(`Asset cleanup: ${details.join(" · ")}`);
+    } catch (error) {
+      saveState.textContent = "Cleanup failed";
+      toast(error.message || "Could not check assets");
+    }
+  }
+
+  // Remove generated placeholder files only when no page or tag points to them.
+  async function cleanEmptyPages() {
+    if (!graphStore) return toast("Open a graph first");
+    if (graphStore.isRemote && graphStore.offline)
+      return toast("Cleaning empty pages requires a connection");
+    try {
+      commitGraphBlock();
+      if (!(await flushGraphSave(true))) return;
+      saveState.textContent = "Checking empty pages…";
+      const pages = await graphStore.scan();
+      const freshIndex = new NotdGraph.GraphIndex(pages);
+      const candidates = pages.filter((page) => {
+        if (page.journal || page.virtual) return false;
+        return (
+          NotdGraph.isEmptyPageContent(page.content) &&
+          !freshIndex.referencesToPage(page.title).length
+        );
+      });
+      if (!candidates.length) {
+        graphIndex = freshIndex;
+        saveState.textContent = "Ready";
+        return toast("No unreferenced empty pages found");
+      }
+      const preview = candidates
         .slice(0, 20)
-        .map((path) => `• ${path}`)
+        .map((page) => `• ${page.path}`)
         .join("\n");
       const remaining =
-        orphans.length > 20 ? `\n• …and ${orphans.length - 20} more` : "";
+        candidates.length > 20
+          ? `\n• …and ${candidates.length - 20} more`
+          : "";
       if (
         !confirm(
-          `Delete these ${orphans.length} orphaned asset${orphans.length === 1 ? "" : "s"}? This cannot be undone.\n\n${preview}${remaining}`,
+          `Delete these ${candidates.length} empty, unreferenced page${candidates.length === 1 ? "" : "s"}? This cannot be undone.\n\n${preview}${remaining}`,
         )
       ) {
         saveState.textContent = "Ready";
         return;
       }
       const results = await Promise.allSettled(
-        orphans.map((path) => graphStore.removeAsset(`/${path}`)),
+        candidates.map((page) => graphStore.deletePage(page)),
       );
       const failed = results.filter(
         (result) => result.status === "rejected",
       ).length;
+      graphIndex = new NotdGraph.GraphIndex(graphStore.pages);
+      journalDocuments.clear();
+      updateStats();
+      const currentWasDeleted =
+        state.graphPage &&
+        !graphStore.pages.some((page) => page.path === state.graphPage.path);
+      if (currentWasDeleted) await openToday(true, { replaceRoute: true });
+      else renderGraphPage();
       saveState.textContent = failed ? "Cleanup incomplete" : "Ready";
       toast(
         failed
-          ? `Could not delete ${failed} orphaned asset${failed === 1 ? "" : "s"}`
-          : `Deleted ${orphans.length} orphaned asset${orphans.length === 1 ? "" : "s"}`,
+          ? `Deleted ${candidates.length - failed} pages; ${failed} failed`
+          : `Deleted ${candidates.length} empty page${candidates.length === 1 ? "" : "s"}`,
       );
     } catch (error) {
       saveState.textContent = "Cleanup failed";
-      toast(error.message || "Could not check assets");
+      toast(error.message || "Could not clean empty pages");
     }
   }
 
@@ -4867,7 +4939,8 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (
       !state.vimEnabled ||
       !$("#commandPalette").hidden ||
-      !$("#confirmDialog").hidden
+      !$("#confirmDialog").hidden ||
+      !$("#assetCleanupDialog").hidden
     )
       return;
     if (
@@ -6122,6 +6195,11 @@ Open, save, export, and reach recent documents or headings from the command pale
       run: () => requestAction(cleanOrphanedAssets),
     },
     {
+      label: "Clean empty pages",
+      keywords: "graph files blank unused orphan cleanup backlinks delete",
+      run: () => requestAction(cleanEmptyPages),
+    },
+    {
       label: "New graph page",
       keywords: "page create graph",
       run: () => requestAction(createGraphPage),
@@ -6194,115 +6272,6 @@ Open, save, export, and reach recent documents or headings from the command pale
       label: "Toggle Vim mode",
       keywords: "vim keyboard normal insert",
       run: () => setVimEnabled(),
-    },
-    {
-      label: "Normal text",
-      keywords: "paragraph",
-      run: () =>
-        transformMarkdownBlock((text) =>
-          text.replace(/^#{1,6}\s+/, "").replace(/^>\s+/gm, ""),
-        ),
-    },
-    {
-      label: "Heading 1",
-      shortcutId: "heading1",
-      keywords: "heading h1",
-      run: () => headingCommand(1),
-    },
-    {
-      label: "Heading 2",
-      shortcutId: "heading2",
-      keywords: "heading h2",
-      run: () => headingCommand(2),
-    },
-    {
-      label: "Heading 3",
-      shortcutId: "heading3",
-      keywords: "heading h3",
-      run: () => headingCommand(3),
-    },
-    {
-      label: "Bold",
-      shortcutId: "bold",
-      keywords: "bold",
-      run: () => wrapMarkdownSelection("**"),
-    },
-    {
-      label: "Italic",
-      shortcutId: "italic",
-      keywords: "italic",
-      run: () => wrapMarkdownSelection("*"),
-    },
-    {
-      label: "Inline code",
-      shortcutId: "code",
-      keywords: "code",
-      run: () => wrapMarkdownSelection("`"),
-    },
-    {
-      label: "Strikethrough",
-      keywords: "strike",
-      run: () => wrapMarkdownSelection("~~"),
-    },
-    {
-      label: "Page reference",
-      keywords: "page wiki brackets reference",
-      run: () => wrapMarkdownSelection("[[", "]]", "page"),
-    },
-    {
-      label: "Block reference",
-      keywords: "block parentheses reference",
-      run: () => wrapMarkdownSelection("((", "))", "block id"),
-    },
-    {
-      label: "Link",
-      keywords: "link url",
-      run: () => wrapMarkdownSelection("[", "](https://)", "text"),
-    },
-    {
-      label: "Image",
-      keywords: "photo image url",
-      run: () => wrapMarkdownSelection("![", "](https://)", "description"),
-    },
-    {
-      label: "Bulleted list",
-      shortcutId: "bulletList",
-      keywords: "list bullet",
-      run: () => prefixMarkdownLines("- "),
-    },
-    {
-      label: "Numbered list",
-      shortcutId: "orderedList",
-      keywords: "list ordered",
-      run: () => prefixMarkdownLines("", true),
-    },
-    {
-      label: "Task",
-      keywords: "task checkbox",
-      run: () => prefixMarkdownLines("- [ ] "),
-    },
-    {
-      label: "Quote",
-      keywords: "quote blockquote",
-      run: () => prefixMarkdownLines("> "),
-    },
-    {
-      label: "Code block",
-      keywords: "code fence",
-      run: () => transformMarkdownBlock((text) => `\`\`\`\n${text}\n\`\`\``),
-    },
-    {
-      label: "Table",
-      keywords: "table rows columns",
-      run: () =>
-        transformMarkdownBlock(
-          () => "| Column 1 | Column 2 |\n| --- | --- |\n| Cell | Cell |",
-        ),
-    },
-    {
-      label: "Divider",
-      keywords: "separator line hr",
-      run: () => transformMarkdownBlock(() => "---"),
     },
     {
       label: "Light theme",
@@ -7656,6 +7625,18 @@ Open, save, export, and reach recent documents or headings from the command pale
     if (event.key === "Escape") {
       event.preventDefault();
       closeDeletePageDialog();
+    }
+  });
+  $("#assetCleanupDialog").addEventListener("click", (event) => {
+    const action = event.target.closest("[data-asset-cleanup]")?.dataset
+      .assetCleanup;
+    if (action === "cancel") closeAssetCleanupDialog();
+    else if (action === "confirm") closeAssetCleanupDialog(true);
+  });
+  $("#assetCleanupDialog").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeAssetCleanupDialog();
     }
   });
   editor.addEventListener("input", (event) => {
