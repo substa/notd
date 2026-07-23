@@ -6515,8 +6515,11 @@ Open, save, export, and reach recent documents or headings from the command pale
     const allPageItems = slashQuery ? [] : recentPageCommands(rawQuery);
     const createItems = allPageItems.filter((command) => command.createPage);
     const pageItems = allPageItems.filter((command) => !command.createPage);
+    const visibleLimit = searching ? 5 : 3;
     const visibleItems = (items, section) =>
-      expandedCommandSections.has(section) ? items : items.slice(0, 5);
+      expandedCommandSections.has(section)
+        ? items
+        : items.slice(0, visibleLimit);
     const visiblePageItems = visibleItems(pageItems, "pages");
     const visibleCommandItems = visibleItems(commandItems, "commands");
     const visibleBlockItems = visibleItems(blockItems, "blocks");
@@ -6565,7 +6568,7 @@ Open, save, export, and reach recent documents or headings from the command pale
         blocks: blockItems.length,
       };
       button.hidden =
-        counts[button.dataset.commandSectionMore] <= 5 ||
+        counts[button.dataset.commandSectionMore] <= visibleLimit ||
         expandedCommandSections.has(button.dataset.commandSectionMore);
     });
     $(".command-palette").classList.toggle(

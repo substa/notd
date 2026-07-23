@@ -48,6 +48,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+#app {
+  color: var(--text);
+}
 button,
 input,
 select,
@@ -797,6 +800,16 @@ svg {
   flex: 2;
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--chrome) 38%, transparent);
+}
+.command-palette:not(.searching) {
+  height: auto;
+}
+.command-palette:not(.searching) .command-section-main,
+.command-palette:not(.searching) .command-section-recent {
+  flex: none;
+}
+.command-palette:not(.searching) .command-list {
+  padding-bottom: 11px;
 }
 .command-palette.searching .command-section {
   flex: 1;
@@ -2328,6 +2341,7 @@ svg {
   border: 0;
   border-radius: 5px;
   background: transparent;
+  color: var(--text);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
