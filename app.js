@@ -198,6 +198,12 @@
       keys: "Mod+Shift+J",
     },
     {
+      id: "tasks",
+      section: "Navigation",
+      label: "Task dashboard",
+      keys: "Mod+Shift+K",
+    },
+    {
       id: "back",
       section: "Navigation",
       label: "Previous page",
@@ -3777,6 +3783,7 @@ Open, save, export, and reach recent documents or headings from the command pale
         }));
     } else if (wikiMatch && graphIndex) {
       const title = wikiMatch[1].trim();
+      if (title.length < 2) return hideGraphAutocomplete();
       const query = NotdGraph.normalizePage(title);
       const pages = graphIndex.pageSuggestions();
       const matches = pages
@@ -6112,6 +6119,12 @@ Open, save, export, and reach recent documents or headings from the command pale
       run: () => requestAction(openToday),
     },
     {
+      label: "Task dashboard",
+      shortcutId: "tasks",
+      keywords: "tasks todo doing done dashboard all",
+      run: () => requestAction(openTasksPage),
+    },
+    {
       label: "Previous page",
       shortcutId: "back",
       keywords: "history back navigate",
@@ -8163,6 +8176,11 @@ Open, save, export, and reach recent documents or headings from the command pale
       return;
     }
     if (!$("#commandPalette").hidden) return;
+    if (shortcutMatches("tasks", event)) {
+      event.preventDefault();
+      requestAction(openTasksPage);
+      return;
+    }
     if (state.graphMode && shortcutMatches("today", event)) {
       event.preventDefault();
       requestAction(openToday);

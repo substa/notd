@@ -128,7 +128,7 @@ Type `[[`. notd immediately inserts `]]` and leaves the caret between the bracke
 [[|]]
 ```
 
-Enter a title. If the page does not exist, choose **Create page** and press `Enter`. The reference is completed and the page is created. The caret remains immediately after the closing `]]`, so typing can continue in the same block.
+Enter at least two characters to display page suggestions. If the page does not exist, choose **Create page** and press `Enter`. The reference is completed and the page is created. The caret remains immediately after the closing `]]`, so typing can continue in the same block.
 
 ### Rename a page
 
@@ -181,6 +181,8 @@ Each bullet is a block. Nested blocks are stored through Markdown indentation.
 Editing does not add a border or background to the active block. To select blocks for a bulk action, use `⌘/Ctrl + click`; `Shift + click` extends the selection across the visible range. Selected blocks are highlighted and can be deleted together with `Backspace`. Deleting a parent block also deletes its nested blocks.
 
 ## Tasks
+
+Open the complete task dashboard with `⌘/Ctrl + Shift + K` or the **Task dashboard** command. The shortcut can be changed from **Settings → Shortcuts**.
 
 Task status controls behave consistently in journal blocks, regular pages, the journal task summary, and the complete task dashboard. Clicking the status indicator changes the state; clicking the task text in a dashboard still opens its source block.
 
